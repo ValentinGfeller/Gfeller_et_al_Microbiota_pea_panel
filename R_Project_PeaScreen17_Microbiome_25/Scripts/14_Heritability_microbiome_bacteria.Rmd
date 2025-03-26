@@ -1,0 +1,244 @@
+---
+title: "Heritability of bacterial community composition"
+author: "Valentin Gfeller"
+date: "`r Sys.Date()`"
+output: 
+  html_document: 
+    toc: true
+    toc_float: true
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+#global knitter option
+knitr::opts_chunk$set(fig.align = "center", echo = FALSE)
+
+# load packages
+library(knitr); packageVersion("knitr")
+library(tidyverse); packageVersion("tidyverse")
+library(ggbeeswarm); packageVersion("ggbeeswarm")
+library(phyloseq); packageVersion("phyloseq")
+library(vegan); packageVersion("vegan")
+library(ape); packageVersion("ape")
+library(here); packageVersion("here")
+library(readxl); packageVersion("readxl")
+library(ggpubr); packageVersion("ggpubr")
+library(nlme); packageVersion("nlme")
+library(lme4); packageVersion("lme4")
+library(FactoMineR); packageVersion("FactoMineR")
+library(factoextra); packageVersion("factoextra")
+library(HLMdiag); packageVersion("HLMdiag")
+
+# functions were written for repeatedly used code (see "/Scripts/Functions.R")
+# source functions
+source(here("Scripts", "Functions.R"))
+
+# set global option for ggplot2
+theme_set(theme_bw(base_size = 12))
+```
+
+# Import data
+```{r include=FALSE}
+load(here("Data", "Interim", "phy.bac.rel.RData"))
+sample_data(phy.bac.rel)$Emergence <- sample_data(phy.bac.rel)$emergence %>% as.factor()
+
+```
+
+# Heritability PCoA axis
+## Extract axis and get overview
+```{r}
+### divide in three groups for visualization (<=3, 3.5-4, >4.5)
+sample_data(phy.bac.rel)$RRI_g[sample_data(phy.bac.rel)$RRI<=3] <- 3
+sample_data(phy.bac.rel)$RRI_g[sample_data(phy.bac.rel)$RRI >3 &
+                                sample_data(phy.bac.rel)$RRI < 4.5] <- 4
+sample_data(phy.bac.rel)$RRI_g[sample_data(phy.bac.rel)$RRI >4] <- 5
+
+sample_data(phy.bac.rel)$RRI_g <- sample_data(phy.bac.rel)$RRI_g %>% 
+  as.factor()
+
+#Relative abundance
+# make ordination and extract PcOA axis
+ord_PCoA_Bray <- ordinate(phy.bac.rel, method = "PCoA", distance = "bray")
+plot_ordination(phy.bac.rel, ord_PCoA_Bray, color = "RRI_g") +
+  gg_col_RRI_g()
+t.pcoa1 <- plot_ordination(phy.bac.rel, ord_PCoA_Bray, justDF = TRUE, axes = 1:2)
+
+# plot PCoA axis against wheat RRI
+## PC 1
+ggplot(t.pcoa1, aes(x = RRI, y = Axis.1)) +
+  geom_quasirandom(width = 0.175, alpha = 0.6) +
+  geom_smooth(method = "lm", se = FALSE) +
+  ggpubr::stat_cor(aes(label = paste(after_stat(rr.label), after_stat(p.label), sep = "~`,`~")))
+
+ggplot(t.pcoa1, aes(x = RRI, y =  -Axis.1, color = breeding_material)) +
+  geom_quasirandom(width = 0.175, alpha = 0.6) +
+  geom_smooth(method = "lm", se = FALSE) +
+  ggpubr::stat_cor(aes(label = paste(after_stat(rr.label), after_stat(p.label), sep = "~`,`~")))
+
+```
+
+Code with inspiration from Brachi et al 2022 (https://doi.org/10.1073/pnas.2201285119)
+## Dim.1
+```{r echo=TRUE}
+# Fit model
+data <- data.frame(Y = t.pcoa1$Axis.1, ID = t.pcoa1$genotype)
+mod <- lmer(Y ~ (1|ID), data)
+
+var_comp <- varcomp.mer(mod)
+H2 <- var_comp[2]/sum(var_comp)
+as.numeric(H2)
+
+## Check lm
+mod <- lm(Y ~ ID, data)
+summary(mod)$adj.r.squared
+
+# Bootstrapping
+var_ID <- function(mod){
+    var_comp <-  varcomp.mer(mod)
+    H2 <-  var_comp[2]/sum(var_comp)
+    return(as.numeric(H2))
+}
+
+mod <- lmer(Y ~ t.pcoa1$rep + (1|ID), data)
+var_ID(mod)
+b <- bootMer(mod, nsim = 999, FUN = var_ID, seed = 5070)
+b$t %>% hist()
+
+med <-  apply(b$t, 2, function(x) as.numeric(median(x, na.rm = TRUE)))
+CI.lower <-  apply(b$t, 2, function(x) as.numeric(quantile(x, probs = 0.025,
+                                                           na.rm = TRUE)))
+CI.upper <-  apply(b$t, 2, function(x) as.numeric(quantile(x, probs = 0.975,
+                                                           na.rm = TRUE)))
+
+d.herit_PCoA_1 <- tibble('CI lower' = CI.lower, Median = med,
+                         'CI upper' = CI.upper) %>% 
+  mutate(diversity = "Beta diversity bacteria (PCo axis 1)") %>% 
+  select(diversity, everything())
+
+d.herit_PCoA_1 %>% 
+  kable(caption = "95% confidence intervals (CIs) of heritabilty of PCo axis 1")
+
+```
+
+## Dim.2
+```{r echo=TRUE}
+# Fit model
+data <- data.frame(Y = t.pcoa1[ ,"Axis.2"], ID = t.pcoa1$genotype)
+mod <- lmer(Y ~ (1|ID), data)
+
+var_comp <- varcomp.mer(mod)
+H2 <- var_comp[2]/sum(var_comp)
+as.numeric(H2)
+
+## Try with normal lm
+mod <- lm(Y ~ ID, data)
+summary(mod)$adj.r.squared
+
+# Bootstrapping
+mod <- lmer(Y ~ t.pcoa1$rep + (1|ID), data)
+b <- bootMer(mod, nsim = 999, FUN = var_ID)
+
+med <-  apply(b$t, 2, function(x) as.numeric(median(x, na.rm=TRUE)))
+CI.lower <-  apply(b$t, 2, function(x) as.numeric(quantile(x, probs = 0.025, na.rm=TRUE)))
+CI.upper <-  apply(b$t, 2, function(x) as.numeric(quantile(x, probs = 0.975, na.rm=TRUE)))
+
+d.herit_PCoA_2 <- tibble('CI lower' = CI.lower, Median = med,
+                         'CI upper' = CI.upper) %>% 
+  mutate(diversity = "Beta diversity fungi (PCo axis 2)") %>% 
+  select(diversity, everything())
+
+
+tibble('CI lower' = CI.lower, Median = med, 'CI upper' = CI.upper) %>% 
+  kable(caption = "95% confidence intervals (CIs) of heritabilty of PCo axis 2")
+
+```
+
+# Alpha diversity
+```{r}
+t.alpha_full <- read_delim(
+  file = here("Data", "Interim", "alpha_div_bac.csv"),
+  delim = ",")
+
+# OTU richness
+# Fit model
+data <- data.frame(Y = t.alpha_full$Richness, ID = t.alpha_full$pea_line)
+mod <- lmer(Y ~ t.alpha_full$Replicate + (1|ID), data)
+
+var_comp <- varcomp.mer(mod)
+H2 <- var_comp[2]/sum(var_comp)
+as.numeric(H2)
+
+## Try with normal lm
+mod <- lm(Y ~ ID, data)
+car::Anova(mod)
+summary(mod)$adj.r.squared
+
+# Bootstrapping
+mod <- lmer(Y ~ t.alpha_full$Replicate + (1|ID), data)
+b <- bootMer(mod, nsim = 999, FUN = var_ID)
+
+med <-  apply(b$t, 2, function(x) as.numeric(median(x, na.rm=TRUE)))
+CI.lower <-  apply(b$t, 2, function(x) as.numeric(quantile(x, probs = 0.025, na.rm=TRUE)))
+CI.upper <-  apply(b$t, 2, function(x) as.numeric(quantile(x, probs = 0.975, na.rm=TRUE)))
+
+
+d.herit_richness <- tibble('CI lower' = CI.lower, Median = med,
+                          'CI upper' = CI.upper) %>% 
+  mutate(diversity = "Alpha diversity bacteria (OTU Richness)") %>% 
+  select(diversity, everything())
+
+
+d.herit_richness %>% 
+  kable(caption = "95% confidence intervals (CIs) of heritabilty of OTU richness")
+```
+
+
+```{r}
+# Shannon
+# Fit model
+data <- data.frame(Y = t.alpha_full$Shannon, ID = t.alpha_full$pea_line)
+mod <- lmer(Y ~ t.alpha_full$Replicate + (1|ID), data)
+
+var_comp <- varcomp.mer(mod)
+H2 <- var_comp[2]/sum(var_comp)
+as.numeric(H2)
+
+## Try with normal lm
+mod <- lm(Y ~ ID, data)
+car::Anova(mod)
+summary(mod)$adj.r.squared
+
+# Bootstrapping
+mod <- lmer(Y ~ t.alpha_full$Replicate + (1|ID), data)
+b <- bootMer(mod, nsim = 999, FUN = var_ID)
+
+med <-  apply(b$t, 2, function(x) as.numeric(median(x, na.rm=TRUE)))
+CI.lower <-  apply(b$t, 2, function(x) as.numeric(quantile(x, probs = 0.025, na.rm=TRUE)))
+CI.upper <-  apply(b$t, 2, function(x) as.numeric(quantile(x, probs = 0.975, na.rm=TRUE)))
+
+d.herit_shannon <- tibble('CI lower' = CI.lower, Median = med,
+                          'CI upper' = CI.upper) %>% 
+  mutate(diversity = "Alpha diversity bacteria (Shannon)") %>% 
+  select(diversity, everything())
+
+d.herit_shannon  %>% 
+  kable(caption = "95% confidence intervals (CIs) of heritabilty of Shannon index")
+
+```
+
+
+# Save heritability
+```{r}
+d.herit_diversity <- bind_rows(d.herit_PCoA_1,
+                               d.herit_richness) %>% 
+  bind_rows(., d.herit_PCoA_2) %>% 
+  bind_rows(., d.herit_shannon) %>% 
+  rename("Heritability" = Median)
+
+
+write.csv(d.herit_diversity, row.names = FALSE,
+          file = here("Data", "Interim", "heritability_diversity_bacteria.csv"))
+
+```
+

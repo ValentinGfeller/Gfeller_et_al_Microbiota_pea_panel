@@ -1,0 +1,642 @@
+---
+title: "Import check data bacteria"
+author: "Valentin Gfeller"
+date: "`r Sys.Date()`"
+output: 
+  html_document: 
+    toc: true
+    toc_float: true
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup}
+#global knitter option
+knitr::opts_chunk$set(fig.align = "center", echo = FALSE)
+
+# load packages
+library(tidyverse)
+library(here)
+library(phyloseq)
+library(vegan)
+library(readxl)
+library(ggpubr)
+library(geomtextpath)
+library(ggbeeswarm)
+library(knitr)
+
+# functions were written for repeatedly used code (see "/Scripts/Functions.R")
+# source functions
+source(here("Scripts", "Functions.R"))
+
+# set global option for ggplot2
+theme_set(theme_bw(base_size = 12))
+```
+
+
+# Prepare data
+## Import data
+### Count table
+```{r include=FALSE}
+# OTU table
+d.botu_full <- read_delim(file = here("Data", "Bacteria", "16S-otu_0.97-feature-table.txt"),
+                          delim = "\t", skip = 1)
+dim(d.botu_full)
+d.botu_full[1:10, 1:10]
+```
+
+
+```{r include=FALSE}
+# Tidy names for downstream processing
+d.botu_full
+colnames(d.botu_full) <- colnames(d.botu_full) %>% str_replace_all("-", "_")
+
+m.botu_full <- d.botu_full %>% select(-c("#OTU ID")) %>% as.matrix()
+rownames(m.botu_full) <- d.botu_full$"#OTU ID"
+
+```
+
+### Add taxonomy (taxatable)
+```{r include=FALSE}
+d.btax_full <- read_delim(file = here("Data", "Bacteria", "16S-otu_0.97-taxonomy.tsv"), 
+                          delim = "\t")
+dim(d.btax_full)
+
+# Split taxon column
+d.btax_full_red <- d.btax_full %>% 
+  separate(Taxon, into =  paste0("V", c(1:7)), sep = ";", remove = FALSE) %>% 
+  select(-`Feature ID`, -Confidence)
+
+d.btax_full_red[1, 1]
+d.btax_full_red$V7 %>% is.na() %>% sum()
+slice_sample(d.btax_full_red, n = 10)
+m.btax_full <- d.btax_full_red %>% 
+  mutate(across(2:8,  ~str_sub(.x, start = 3L)),
+         across(2:8,  ~str_replace(.x, "_", "")),
+         across(2:8,  ~str_replace(.x, "_", "")),
+         across(2:8,  ~str_replace(.x, "assigned", "unassigned"))) %>% 
+  select(!Taxon) %>% as.matrix()
+
+row.names(m.btax_full) <- d.btax_full$`Feature ID`
+colnames(m.btax_full) <- c("Kingdom", "Phylum", "Class", "Order", "Family", 
+                           "Genus", "Species")
+
+m.btax_full[is.na(m.btax_full)] <- "unassigned"
+
+```
+
+### Import to phyloseq
+```{r include=FALSE}
+phy.bac_all <- phyloseq(
+  otu_table(m.botu_full, taxa_are_rows = TRUE),
+  tax_table(m.btax_full))
+phy.bac_all
+
+head(tax_table(phy.bac_all))
+head(otu_table(phy.bac_all)) %>% .[1:4, 1:4]
+
+# rename to bOTU1 - bOTUn
+otu.orignial <- taxa_names(phy.bac_all)
+taxa_names(phy.bac_all) <- paste("bOTU", 1:ntaxa(phy.bac_all), sep = "")
+otu.new <- taxa_names(phy.bac_all)
+
+comb <- tibble(original = otu.orignial, new = otu.new)
+
+comb[comb$new %in% c("bOTU1", "bOTU15", "bOTU74", "bOTU28"), ]
+
+# Save table with old and new OTU names 
+write.csv(comb, row.names = FALSE,
+          file = here("Data", "Bacteria", "bOTU_names_old_to_new.csv"))
+
+rm(list = c("m.botu_full", "m.btax_full",
+            "otu.orignial", "otu.new", "comb", "d.botu_full", "d.btax_full",
+            "d.btax_full_red"))
+```
+
+### Import metadata merge with existing phyloseq object
+```{r include=FALSE}
+d.metadata <- read_delim(file = here("Data", "Bacteria", "Metadata_agribiome_bacteria.csv")) %>% 
+  mutate(rep = as.factor(rep))
+
+# Check that sample names of metadata and sequencing data match
+identical(sample_names(phy.bac_all) %>% sort(), d.metadata$name.ngs_long %>% sort())
+
+d.metadata <- d.metadata %>% as.data.frame()
+rownames(d.metadata) <- d.metadata$name.ngs_long
+d.metadata <- d.metadata[sample_names(phy.bac_all), ]
+identical(sample_names(phy.bac_all), d.metadata$name.ngs_long)
+
+phy.bac_all <- merge_phyloseq(phy.bac_all, sample_data(d.metadata))
+
+rm(list = c("d.metadata"))
+```
+
+```{r include=FALSE}
+#Keep track of data loss
+t.data_log <- tibble(Procedure = "Start",
+                     OTUs = ntaxa(phy.bac_all), 
+                     Samples = nsamples(phy.bac_all), 
+                     Sequences = sum(otu_table(phy.bac_all)))
+
+t.data_log
+```
+
+## Check data first filtering
+```{r include=FALSE}
+## How many OTUs are not "Bacteria" at kingdom level?
+t.king <- tax_table(phy.bac_all) %>% data.frame() %>%  pull(Kingdom)
+(n2 <- t.king[!t.king =="Bacteria"] %>% length())
+
+# How many unassigned at Kindom level?
+t.king[t.king == "unassigned"] %>% length()
+
+## What kind of other "Kingdoms" do we find?
+t.king %>% unique()
+kingdoms <- t.king[!t.king =="Bacteria"] %>% unique() %>% .[.!= "unassigned"]
+
+# Look at Archeae
+tax_table(phy.bac_all) %>% data.frame() %>% filter(Kingdom == "Archaea")
+phy.bac.rel <-  transform_sample_counts(phy.bac_all, function(x) (x / sum(x)) * 100)
+otu_table(phy.bac.rel)[c("bOTU19499")] %>% mean()
+otu_table(phy.bac.rel)[c("bOTU20011")] %>% mean()
+otu_table(phy.bac_all)[c("bOTU19499")] %>% sum()
+otu_table(phy.bac_all)[c("bOTU20011")] %>% sum()
+otu_table(phy.bac_all) %>% sum() # out of almost 30 mio reads
+# --> exclude as there are only 4 Archaea sequences. They are removed by the filtering
+
+# Look at other Kingdoms
+tax_table(phy.bac_all) %>% data.frame() %>% filter(Kingdom == "unassigned")
+tax_table(phy.bac_all) %>% data.frame() %>% filter(Kingdom == "Eukaryota")
+
+## Check abundance of unassigned OTUs
+tab.unassigend <- tax_table(phy.bac_all) %>% data.frame() %>% 
+  filter(Kingdom == "unassigned") %>% rownames()
+otu_table(phy.bac_all)[tab.unassigend] %>% data.frame() %>% 
+  rownames_to_column("OTU") %>% 
+  as_tibble() %>% 
+  mutate(sum = rowSums(across(where(is.numeric)))) %>% 
+  select(c(OTU, sum))
+
+# Total number of sequences
+(n1 <- sum(otu_table(phy.bac_all)))
+
+phy.bac_all %>% tax_table() %>% data.frame() %>%  
+  filter(if_any(.cols = everything(), ~ grepl("Chloroplast", .)))
+phy.bac_all %>% tax_table() %>% data.frame() %>%  
+  filter(if_any(.cols = everything(), ~ grepl("Mitochondria", .))) 
+
+# Remove unwanted OTUs
+phy.bac_all <- phy.bac_all %>%
+  subset_taxa(
+    Kingdom != "Eukaryota" &
+    Kingdom != "unassigned" &
+    Kingdom != "Archaea" &
+    Family  != "Mitochondria" &
+    Phylum  != "Cyanobacteria" # excludes chloroplasts
+  )
+
+phy.bac_all %>% tax_table() %>% data.frame() %>%  
+  filter(if_any(.cols = everything(), ~ grepl("Chloroplast", .)))
+
+phy.bac_all %>% tax_table() %>% data.frame() %>%  
+  filter(if_any(.cols = everything(), ~ grepl("Mitochondria", .)))
+
+rm(list = c("kingdoms", "t.king", "tab.unassigend", "phy.bac.rel"))
+```
+
+The original OTU table from our bioinformatician has `r n1` reads.
+There are `r n2` OTUS not identified as "Bacteria" at kingdom level and excluded. 
+
+
+```{r include=FALSE}
+#Keep track of data loss
+phy.bac_all <- prune_taxa(taxa_sums(phy.bac_all) > 0, phy.bac_all)
+
+t.data_log <- t.data_log %>% 
+  bind_rows(., tibble(Procedure = "Filter_eucar_mitoc_cyan",
+                      OTUs      = ntaxa(phy.bac_all), 
+                      Samples   = nsamples(phy.bac_all), 
+                      Sequences = sum(otu_table(phy.bac_all))))
+
+t.data_log
+
+rm(list = c("n1", "n2"))
+
+```
+
+# Sequencing depth
+```{r}
+t.otu <- otu_table(phy.bac_all)
+t.design <- sample_data(phy.bac_all)
+number_sequences_perSample <- colSums(t.otu)
+
+t.design$run %>% unique()
+d.num_seq <- cbind(number_sequences_perSample, t.design)
+d.num_seq %>% filter(run == "M05812_0170") %>% summarise(seq_per_run = sum(number_sequences_perSample))
+d.num_seq %>% filter(run == "M06648_0161") %>% summarise(seq_per_run = sum(number_sequences_perSample))
+d.num_seq %>% filter(run == "M06648_0159") %>% summarise(seq_per_run = sum(number_sequences_perSample))
+d.num_seq %>% filter(run == "M06648_0164") %>% summarise(seq_per_run = sum(number_sequences_perSample))
+
+rm(list = c("t.otu", "t.design"))
+```
+
+
+```{r include=FALSE}
+# Replicate/run
+d.num_seq %>% 
+  ggplot(aes(x = rep,
+             y = number_sequences_perSample,
+             color = run)) +
+  geom_boxplot(outlier.colour = NA) +
+  geom_jitter(aes(shape = run),  position = position_dodge2(0.2), 
+              size =2, alpha = 0.5) +
+  theme(legend.position="bottom") +
+  geom_texthline(yintercept = 11000, label = "Threshold of 11000 seq.", 
+                 hjust = 0.8)
+
+# 11'000 sequences seem to be a reasonable cut off to get rid of low quality samples
+
+# Check NAs
+d.num_seq %>% filter(is.na(rep)) %>% tail(n = 15)
+
+
+# breeding material (cultivars, breeding lines, accessions)
+d.num_seq %>% 
+  ggplot(aes(x = breeding_material,
+             y = number_sequences_perSample,
+             color = breeding_material)) +
+  geom_boxplot(outlier.colour = NA) +
+  geom_jitter(position = position_dodge2(0.2), 
+              size = 2, alpha = 0.5) +
+  theme(legend.position="bottom") +
+  geom_texthline(yintercept = 11000, label = "Threshold of 11000 seq.", 
+                 hjust = 0.95)
+
+
+```
+
+
+```{r}
+richness <- specnumber(otu_table(phy.bac_all), MARGIN = 2)
+d.rich <- sample_data(phy.bac_all)
+d.rich$richness <-  richness
+
+d.rich %>% 
+  ggplot(aes(x = richness, fill = run)) +
+  geom_density(color = "black", alpha = 0.2, adjust = 1.5) +
+  xlab("Number of OTUs per sample")
+
+
+# Lack of seq depth led to lower OTU richness --> Account for this in down stream analysis (rarefy, clr transform, work with relative abundance)!
+
+rm(list = c("d.rich", "richness", "d.num_seq"))
+```
+
+
+# Rarefaction curves
+```{r, include=FALSE}
+# Prepare data format
+t.otu_m <- otu_table(phy.bac_all) # extract OTU table
+class(t.otu_m) <- "matrix" # Convert to matrix
+t.otu_m_t <- t(t.otu_m) # transpose observation to rows as needed for vegan functions
+t.otu_m_t[1:10, 1:10]
+
+# Rarefy
+d.rarefaction_all <- rarecurve(t.otu_m_t,
+                               step = 100,
+                               xlab = "Number of sequences",
+                               ylab = "Number of bOTUs", label = FALSE,
+                               tidy = TRUE)
+
+
+# Add meta data
+t.data_m <- sample_data(phy.bac_all) %>%  # extract sample data
+  data.frame() %>% 
+  select(name.ngs_long, rep, exclude, run)
+d.rarefaction_all_m <- left_join(d.rarefaction_all, t.data_m, by = c("Site" = "name.ngs_long"))
+
+# check random samples
+slice_sample(d.rarefaction_all_m, n = 10)
+
+
+p.rar <- d.rarefaction_all_m %>% 
+  ggplot(aes(Sample, Species, group = Site)) +
+  geom_line(alpha = 1/4) +
+  labs(x = "Number of sequences",
+       y = "Number of OTUs") +
+  facet_wrap(vars(run), ncol = 1) +
+  # theme(legend.position = "bottom") + 
+  # geom_textvline(xintercept = 1000, label = "1000 seq.", 
+  #                hjust = 0.9, size = 2.75) +
+  coord_cartesian(xlim = c(0, 45000), ylim = c(0, 505)) +
+  theme(strip.background = element_rect(fill = "grey90"))
+p.rar
+
+
+rm(list = c("t.otu_m", "t.otu_m_t", "p.rar", "d.rarefaction_all",
+            "d.rarefaction_all_m", "t.data_m"))
+
+```
+
+Remove samples below threshold
+```{r include=FALSE}
+threshold <- 11000 # Based on plots with sampling depth and rarefaction curve
+
+# How many samples are lost?
+nr_seq <- colSums(otu_table(phy.bac_all))
+sample_to_drop <- sum(nr_seq  < threshold)
+sample_to_drop
+
+# Which samples are lost and how do they look like (phenotype)?
+below_threshold <- subset_samples(phy.bac_all, colSums(otu_table(phy.bac_all))< threshold)
+sample_data(below_threshold) %>% data.frame()
+
+# Remove samples below threshold
+phy.bac_all <- subset_samples(phy.bac_all, colSums(otu_table(phy.bac_all))>threshold)
+
+# Add sequencing depth to sample data
+t.otu <- otu_table(phy.bac_all)
+number_sequences_perSample <- colSums(t.otu)
+sample_data(phy.bac_all)$number_sequences_perSample <- number_sequences_perSample
+
+```
+
+`r sample_to_drop`  samples are lost when removing samples below threshold of `r threshold` sequences per sample. Only `r sample_data(below_threshold) %>% data.frame() %>% filter(exclude == "keep") %>% nrow()` of the removed samples was not a control sample: `r sample_data(below_threshold) %>% data.frame() %>% filter(exclude == "keep") %>% row.names()`.
+
+
+
+```{r include=FALSE}
+#Keep track of data loss
+phy.bac_all <- prune_taxa(taxa_sums(phy.bac_all) > 0, phy.bac_all)
+
+t.data_log <- t.data_log %>% 
+  bind_rows(., tibble(Procedure = "Remove_samples_below_threshold",
+                      OTUs      = ntaxa(phy.bac_all), 
+                      Samples   = nsamples(phy.bac_all), 
+                      Sequences = sum(otu_table(phy.bac_all))))
+
+t.data_log
+
+rm(list = c("number_sequences_perSample", "t.otu", "below_threshold", "sample_to_drop",
+            "nr_seq", "threshold"))
+```
+
+# Filter
+## Remove unwanted samples 
+Some pea lines were found to be heterozygous after the samples were sequenced (according to Lukas Wille, Daniel Suarez). These samples and control samples were removed for the analysis.
+
+```{r include=FALSE}
+# reasons for removal
+sample_data(phy.bac_all)$exclude %>% table(useNA = "always")
+
+# Reduce Phyloseq object
+keep_samples <- sample_names(phy.bac_all)[str_detect(sample_data(phy.bac_all)$exclude, "keep")]
+
+# Extract wanted samples out of phy.bac_all object for further processing
+phy.bac_all <- prune_samples(sample_names(phy.bac_all) %in% keep_samples, phy.bac_all)
+
+# check for duplicated samples:
+phy.bac_all %>% sample_data() %>% data.frame %>%
+  group_by(genotype, rep) %>% 
+  summarise(
+    n = n(),
+  .groups = "drop") %>%
+  filter( n > 1)
+
+rm(list = c("keep_samples"))
+```
+
+
+
+```{r include=FALSE}
+#Keep track of data loss
+phy.bac_all <- prune_taxa(taxa_sums(phy.bac_all) > 0, phy.bac_all)
+
+t.data_log <- t.data_log %>% 
+  bind_rows(., tibble(Procedure = "Select_samples_for_this_ananlysis",
+                      OTUs      = ntaxa(phy.bac_all), 
+                      Samples   = nsamples(phy.bac_all), 
+                      Sequences = sum(otu_table(phy.bac_all)),
+                      note = "Controls, heterozygous material"))
+
+
+t.data_log
+```
+
+
+## Filter seqeunces
+```{r}
+# Singleton OTUs
+phy.bac_all <- prune_taxa(taxa_sums(phy.bac_all) > 1, phy.bac_all)
+
+## Keep only OTUs with at least 4 sequences in at least 4 samples
+test_function <- function(x) { x >  4}
+taxa.to.keep <- genefilter_sample(phy.bac_all, test_function, A = 4)
+phy.bac_red_wo_low_ab <- prune_taxa(taxa.to.keep, phy.bac_all)
+red_otu <- ntaxa(phy.bac_red_wo_low_ab)
+tot_otu <- ntaxa(phy.bac_all)
+
+# Remove unwanted OTUs
+phy.bac_all <- prune_taxa(taxa.to.keep, phy.bac_all)
+
+
+rm(list = c("phy.bac_red_wo_low_ab", "test_function", "taxa.to.keep"))
+```
+Only OTUs with at least 4 sequences in a least 4 samples were kept. So, `r red_otu` out of `r tot_otu` kept for further analysis.
+
+```{r include=FALSE}
+#Keep track of data loss
+phy.bac_red <- prune_taxa(taxa_sums(phy.bac_all) > 0, phy.bac_all)
+
+t.data_log <- t.data_log %>% 
+  bind_rows(., tibble(Procedure = "Filter_low_abundante",
+                      OTUs      = ntaxa(phy.bac_red), 
+                      Samples   = nsamples(phy.bac_red), 
+                      Sequences = sum(otu_table(phy.bac_red))))
+
+t.data_log
+rm(list = c("phy.bac_red", "red_otu", "tot_otu"))
+```
+
+# Plot sequencing depth for the selected samples
+```{r}
+t.design <- sample_data(phy.bac_all) %>% data.frame()
+
+t.design %>% 
+  summarize(mean = mean(number_sequences_perSample, na.rm = TRUE),
+            sd = sd(number_sequences_perSample))
+
+mean_seq_per_samp <- t.design %>% 
+  summarize(mean = mean(number_sequences_perSample, na.rm = TRUE)) %>% pull(mean)
+
+
+p <- t.design %>% 
+  mutate(breeding_material = factor(breeding_material,
+                                    levels = c("gb", "bm", "cv"))) %>%
+  ggplot(aes(x = run,
+             y = number_sequences_perSample)) +
+  geom_boxplot(outlier.colour = NA) +
+  geom_hline(yintercept = mean_seq_per_samp, linetype = 2, alpha = 0.5) +
+  geom_quasirandom(aes(color = breeding_material), width = 0.25, size = 2, 
+                   alpha = 0.2, show.legend = FALSE) +
+  theme(legend.position="bottom") +
+  facet_wrap(vars(breeding_material), ncol = 3,
+             labeller = as_labeller(c(bm = "Breeding material",
+                                      cv = "Cultivar",
+                                      gb = "Gene bank"))) +
+  labs(x = "Run",
+       y = "Number of sequences per sample") +
+  scale_x_discrete(guide = guide_axis(angle = 15)) +
+  theme(strip.background = element_rect(fill = "grey90"),
+        text = element_text(size = 10)) +
+  scale_color_manual(values = c(gb = "#FFCC22", 
+                                bm = "#56B4E9", 
+                                cv = "#009E73")) 
+
+p
+
+p <- p + ggtitle("Bacteria")
+saveRDS(p, here("Data", "Interim", "Figures", "Sequencing_depth_bacteria.rds"))
+
+rm(list = c("t.design", "p", "mean_seq_per_samp"))
+```
+
+
+# Transformation and mean per genotype
+## Counts
+### Mean per accession
+```{r include=FALSE}
+# allow missing values
+my_mean <- function(x) {mean(x, na.rm = TRUE)}
+
+# Merge samples by pea accession
+phy.bac_red <-
+  speedyseq::merge_samples2(
+    phy.bac_all,
+    "genotype",
+    fun_otu = mean,
+    funs = list(
+      emergence = my_mean,
+      height = my_mean,
+      height_ratio_SNS = my_mean,
+      numb_nodules = my_mean,
+      RRI = my_mean,
+      shoot_dw = my_mean,
+      shoot_dw_ratio_SNS = my_mean,
+      number_sequences_perSample = my_mean,
+      yield_ratio_SNS = my_mean
+    )
+  )
+
+
+# round OTU count to the next integer
+otu_table(phy.bac_red) <- otu_table(phy.bac_red) %>% ceiling()
+
+# remove empty columns
+new_samp_dat <- phy.bac_red %>% sample_data() %>% data.frame() %>% select(-c(name.ngs_long, exp.id, plate_id, rep, run))
+
+phy.bac_red <- phyloseq(otu_table(phy.bac_red),
+                        tax_table(phy.bac_red),
+                        sample_data(new_samp_dat))
+
+
+rm(list = c("my_mean", "new_samp_dat"))
+```
+
+
+## CLR transform
+### All replicates
+```{r}
+# count table
+tab_otu <- phy.bac_all %>% otu_table() %>% data.frame()
+
+# sample table
+tab_samp <- phy.bac_all %>% sample_data() %>% data.frame()
+
+# clr transform
+set.seed(5070)
+estimates <- ALDEx2::aldex.clr(tab_otu, denom = "all", 
+                                 conds = rep("cond",  ncol(tab_otu))) 
+mc.estimates <- ALDEx2::getMonteCarloInstances(estimates)
+tab_otu_clr_ald  <- do.call(cbind, lapply(mc.estimates, rowMeans))
+
+phy.bac_clr <- phyloseq(sample_data(phy.bac_all), 
+                        otu_table(tab_otu_clr_ald, 
+                                        taxa_are_rows = TRUE),
+                        tax_table(phy.bac_all))
+
+rm(list = c("tab_otu", "tab_samp", "estimates", "mc.estimates", "tab_otu_clr_ald"))
+```
+
+
+### Mean per accession
+```{r include=FALSE}
+# count table
+tab_otu <- phy.bac_red %>% otu_table() %>% data.frame()
+
+# sample table
+tab_samp <- phy.bac_red %>% sample_data() %>% data.frame()
+
+# clr transform
+set.seed(5070)
+estimates    <- ALDEx2::aldex.clr(tab_otu, denom = "all", 
+                                 conds = rep("cond",  ncol(tab_otu))) # clr transform data
+mc.estimates <- ALDEx2::getMonteCarloInstances(estimates)
+tab_otu_clr_ald_red  <- do.call(cbind, lapply( mc.estimates, rowMeans))
+
+phy.bac_clr_red <- phyloseq(sample_data(phy.bac_red), 
+                            otu_table(tab_otu_clr_ald_red, 
+                                      taxa_are_rows = TRUE),
+                            tax_table(phy.bac_red))
+
+rm(list = c("tab_otu", "tab_samp", "estimates", "mc.estimates", "tab_otu_clr_ald_red"))
+```
+
+
+## Relative abundance
+### All replicates
+```{r}
+phy.bac.rel <- transform_sample_counts(phy.bac_all, 
+                                       function(x) (x / sum(x)) * 100)
+```
+
+### Mean per accession
+```{r}
+phy.bac.rel_red <- transform_sample_counts(phy.bac_red, 
+                                           function(x) (x / sum(x)) * 100)
+```
+
+# Infos about filtering
+```{r}
+kable(t.data_log, caption = "Information about loss of data during tidying")
+```
+
+```{r include=FALSE}
+# number of accessions left
+sample_data(phy.bac_all)$genotype %>% unique() %>% length()
+```
+
+# Save phyloseq object for further analysis
+```{r}
+# Counts
+save(phy.bac_all, file = here("Data", "Interim", "phy.bac_all.RData"))
+# Counts accession means
+save(phy.bac_red, file = here("Data", "Interim", "phy.bac_red.RData"))
+
+# CLR transformed
+save(phy.bac_clr, file = here("Data", "Interim", "phy.bac_clr.RData"))
+# CLR transformed accession means
+save(phy.bac_clr_red, file = here("Data", "Interim", "phy.bac_clr_red.RData"))
+
+# Relative abundance
+save(phy.bac.rel, file = here("Data", "Interim", "phy.bac.rel.RData"))
+# Relative abundance accession means
+save(phy.bac.rel_red, file = here("Data", "Interim", "phy.bac.rel_red.RData"))
+
+```
+
+
+```{r}
+
+```
+

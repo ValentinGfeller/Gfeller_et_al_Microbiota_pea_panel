@@ -1,0 +1,7 @@
+{
+    "installOptions": {
+        "installFromRepository": true,
+        "libraryPath": "/data/vgfeller/R_Projects/__FOR_UPLOAD_PeaScreen17_Microbiome_25/renv/library/R-4.3/x86_64-pc-linux-gnu",
+        "installDependencies": true
+    }
+}

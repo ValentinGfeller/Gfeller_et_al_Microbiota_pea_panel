@@ -1,0 +1,28 @@
+{
+    "id": "1A388B8B",
+    "path": "~/data/R_Projects/__FOR_UPLOAD_PeaScreen17_Microbiome_25/Scripts/13_Beta_diversity_bacteria.Rmd",
+    "project_path": "Scripts/13_Beta_diversity_bacteria.Rmd",
+    "type": "r_markdown",
+    "hash": "3510026906",
+    "contents": "",
+    "dirty": false,
+    "created": 1739534830216.0,
+    "source_on_save": false,
+    "relative_order": 12,
+    "properties": {
+        "chunk_output_type": "console",
+        "source_window_id": "",
+        "Source": "Source",
+        "cursorPosition": "763,0",
+        "scrollLine": "0",
+        "docOutlineVisible": "1"
+    },
+    "folds": "",
+    "lastKnownWriteTime": 1739535513,
+    "encoding": "UTF-8",
+    "collab_server": "",
+    "source_window": "",
+    "last_content_update": 1739535513414,
+    "read_only": false,
+    "read_only_alternatives": []
+}

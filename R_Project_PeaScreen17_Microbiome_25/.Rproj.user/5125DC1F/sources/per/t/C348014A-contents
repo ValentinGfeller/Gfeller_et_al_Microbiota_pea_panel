@@ -1,0 +1,649 @@
+---
+title: "Alpha diversity analysis fungi"
+author: "Valentin Gfeller"
+date: "`r Sys.Date()`"
+output: 
+  html_document: 
+    toc: true
+    toc_float: true
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+#global knitter option
+knitr::opts_chunk$set(fig.align = "center", echo = FALSE)
+
+# load packages 
+library(tidyverse); packageVersion("tidyverse")
+library(phyloseq); packageVersion("phyloseq")
+library(vegan); packageVersion("vegan")
+library(ape); packageVersion("ape")
+library(here); packageVersion("here")
+library(readxl); packageVersion("readxl")
+library(ggpubr); packageVersion("ggpubr")
+library(nlme); packageVersion("nlme")
+library(lme4); packageVersion("lme4")
+library(car); packageVersion("car")
+library(ggbeeswarm); packageVersion("ggbeeswarm")
+library(emmeans); packageVersion("emmeans")
+library(ggtext); packageVersion("ggtext")
+library(cowplot); packageVersion("cowplot")
+
+
+# functions were written for repeatedly used code (see "/Scripts/Functions.R")
+# source functions
+source(here("Scripts", "Functions.R"))
+
+# set global option for ggplot2
+theme_set(theme_bw(base_size = 12))
+```
+
+
+# Import data and rarefy data
+```{r include=FALSE}
+load(here("Data", "Interim", "phy.fun.all.RData"))
+
+# Rarefy
+phy.fun_rar <- rarefy_even_depth(phy.fun.all, rngseed = 5070, sample.size = 1000)
+
+
+```
+
+
+# Calculate diversity indices
+## Richness
+((rarefying --> richness) x 1000) --> mean
+```{r}
+# Get OTU table
+d.samp <- phy.fun.all %>% sample_data() %>% data.frame()
+d.otu <- phy.fun.all %>% otu_table() %>% data.frame()
+
+# Get threshold to rarefy
+thresh <- sort(colSums(d.otu), decr = FALSE)[1:10]
+thresh <- floor(thresh[1]/ 100) * 100 # round numbers to the next higher 100
+
+# Function to calculate species richness by rarefying and calculating the richness 1000 times
+calc_sp_richness <- function(d.otu, thresh){
+  # Calculate species richness
+  t.sp_richness <- c()
+  for (i in 1:1000){
+    # rarefy OTU table
+    temp_sp_richness <- t(rrarefy(t(d.otu), thresh)) %>% as.matrix()
+    sp_richness <- vegan::specnumber(temp_sp_richness, MARGIN = 2) 
+    t.sp_richness <- cbind(t.sp_richness, sp_richness)
+    }
+    return(t.sp_richness)
+}
+
+# Calculate Shannon index
+set.seed(5070)
+x1000_sp_richness <- calc_sp_richness(d.otu, thresh)
+x1000_sp_richness[1:5, 1:5]
+d.alpha <- bind_cols(d.samp, sp_richness = rowMeans(x1000_sp_richness) %>% 
+      round()) %>% 
+  select(1:13, "richness" = sp_richness, everything())
+d.alpha[1:5, 10:14]
+
+```
+
+## Shannon Index
+((rarefying --> Shannon Index) x 1000) --> mean
+```{r}
+# Function to calculate Shannon Index by rarefying and calculating the Shannon Index 1000 times
+calc_shannon <- function(d.otu, thresh){
+  # Calculate Shannon diversity
+  t.shannon <- c()
+  for (i in 1:1000){
+    # rarefy OTU table
+    temp_shannon <- t(rrarefy(t(d.otu), thresh)) %>% as.matrix()
+    shannon <- vegan::diversity(temp_shannon, index = "shannon", MARGIN = 2)
+    t.shannon <- cbind(t.shannon, shannon)
+    }
+    return(t.shannon)
+}
+
+# Calculate Shannon index
+set.seed(5070)
+x1000_Shannon <- calc_shannon(d.otu, thresh)
+x1000_Shannon[1:5, 1:5]
+d.alpha <- bind_cols(d.alpha, d = rowMeans(x1000_Shannon)) %>% 
+  select(1:14, "shannon" = d, everything())
+d.alpha[1:5, 10:15]
+
+rm(list = c("x1000_Shannon", "x1000_sp_richness"))
+```
+
+## Pielou's evenness
+Pielou's evenness: shannon / log(richness)
+```{r}
+# Calculate Pielou's evenness
+d.alpha <- d.alpha %>% 
+  mutate(pielou = shannon/log(richness)) %>% 
+  select(1:15, pielou, everything())
+d.alpha[1:5, 10:16]
+
+cor(d.alpha$shannon, d.alpha$pielou)
+plot(d.alpha$shannon, d.alpha$pielou) # Shannon and Pielou are highly correlated! --> only analyze Shannon
+
+```
+
+Save alpha diversity measures
+```{r}
+t.comp_alpha_div <- d.alpha %>% 
+  select("pea_line" = genotype, "Replicate" = rep, "Richness" = richness,
+         "Shannon" = shannon) %>% 
+  mutate(letter = str_replace_all(pea_line, "[:digit:]", ""),
+         number = parse_number(pea_line),
+         pea_line2 = paste0(letter, sprintf("%03.0f", number))) %>% 
+  select(-c(letter, number)) %>% 
+  select(pea_line, pea_line2, everything()) %>% 
+  arrange(pea_line2) %>% tibble()
+
+write.csv(t.comp_alpha_div, row.names = FALSE,
+          file = here("Data", "Interim", "alpha_div_fun.csv"))
+```
+
+# Statistics and visualization
+# Shannon
+## Seed source
+```{r}
+# Breeding material effect
+mod.mat <- lm(shannon ~ breeding_material, data = d.alpha)
+Anova(mod.mat)
+summary(mod.mat)
+plot.mod.vg(mod.mat)
+
+lab_anova_source <- paste0("**ANOVA**<Br> Seed source: *R<sup>2</sup>* = ", 
+                           signif(summary(mod.mat)$adj.r.squared*100, 2),"%;  *P* = ",
+                           signif(Anova(mod.mat)$`Pr(>F)`[1], 2))
+
+
+## Pairwise comparison
+emmeans(mod.mat, specs = pairwise ~ breeding_material) %>% 
+  .$contrasts %>%
+     rbind(adjust = "fdr") %>% 
+     summary(infer = TRUE)
+
+# calculate differences
+t.mult_cld <- multcomp::cld(emmeans(mod.mat, specs = ~ breeding_material), 
+                            Letters = letters, adjust = "fdr") %>% as.data.frame()
+
+t.pos_cld_ <- d.alpha %>%
+  group_by(breeding_material) %>% 
+  summarise(pos_cld = max(shannon) + 0.25)
+
+t.cld <- left_join(t.mult_cld, t.pos_cld_)
+
+```
+
+```{r}
+## Plot
+p.bred <- d.alpha %>% 
+  mutate(breeding_material = factor(breeding_material, 
+                                    levels = c("gb", "bm", "cv"))) %>% 
+  ggplot(aes(x = breeding_material, 
+             y = shannon))  +
+  geom_boxplot(outlier.colour = NA) +
+  geom_quasirandom(aes(color = breeding_material),
+                   dodge.width = 0.75, width = 0.15, alpha = 0.5,
+                   size = 2, show.legend = FALSE, shape = 16) +
+  stat_summary(fun = mean, 
+               geom = "point",
+               size = 2,
+               shape = 18) +
+  stat_summary(fun.data = mean_se, 
+               fun.args = list(mult = 1),
+               geom = "errorbar",
+               width = 0.3)  +
+  labs(x = "Seed source",
+       y = "Shannon") +
+  scale_x_discrete(labels = c(gb = "Gene bank",
+                              bm ="Breeding material",
+                              cv = "Cultivar")) +
+  scale_color_manual(values = c(gb = "#FFCC22", 
+                                bm = "#56B4E9", 
+                                cv = "#009E73")) 
+
+
+p <- p.bred +
+      geom_text(data = t.cld, aes(x = breeding_material, y = pos_cld, 
+                              label = trimws(.group)), size = 5) +
+      geom_richtext(aes(x = -Inf, y = 4, label = lab_anova_source),
+                    stat = "unique",
+                    fill = "white", label.color = "white",
+                    label.padding = grid::unit(c(0.5, 0.5, 0.5, 0.75), "lines"),
+                    hjust = 0, vjust = 0.5, size = 3,
+                    label.r = unit(0, "lines")) +
+  ggtitle("Fungi") +
+  theme(plot.title = element_text(hjust = 0.05))
+
+p
+
+```
+
+## Genotype
+```{r}
+# Genotype effect
+mod.gen <- lm(shannon ~ genotype, data = d.alpha)
+Anova(mod.gen)
+summary(mod.gen)$adj.r.square
+summary(mod.gen)$r.square
+plot.mod.vg(mod.gen)
+
+# lab_anova_gen <- paste0("**ANOVA**<Br> Genotype:  *P* = ", signif(Anova(mod.gen)$`Pr(>F)`[1], 2))
+lab_anova_gen <- paste0("**ANOVA**<Br> Genotype: *R<sup>2</sup>* = ", signif(summary(mod.gen)$adj.r.squared*100, 2),"%;  *P* = ", signif(Anova(mod.gen)$`Pr(>F)`[1], 2))
+
+## Plot
+v.sort <- d.alpha %>% 
+  mutate(breeding_material = factor(breeding_material, 
+                                    levels = c("gb", "bm", "cv"))) %>%
+  group_by(genotype) %>% 
+  summarise(
+    mean_shannon = mean(shannon, na.rm = TRUE)) %>% 
+  arrange(mean_shannon) %>% 
+  pull(genotype) %>% unique()
+
+p.lines <- d.alpha %>% 
+  mutate(breeding_material = factor(breeding_material, 
+                                    levels = c("gb", "bm", "cv"))) %>%
+  mutate(genotype = factor(genotype, levels = v.sort))  %>% 
+  ggplot(aes(x = genotype, 
+             y = shannon, color = breeding_material)) +
+  geom_point(alpha = 0.8, size = 0.5) +
+  stat_summary(fun = mean, 
+               geom = "point",
+               alpha = 0.5) +
+  stat_summary(fun.data = mean_se, 
+               fun.args = list(mult = 1),
+               geom = "errorbar",
+               linewidth  = 0.3,
+               width = 1.25) +
+  scale_color_manual(name = "Seed source",
+                     values = c(gb = "#FFCC22", 
+                                bm = "#56B4E9", 
+                                cv = "#009E73"),
+                     labels = c(gb = "Gene bank",
+                                bm = "Breeding material",
+                                cv = "Cultivar")) +
+  labs(y = "Shannon",
+       x = "Genotypes")  +
+  theme(panel.grid.major = element_blank(), 
+        panel.grid.major.y = element_line(linewidth = .1),
+        axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1, size = 1.75),
+        legend.position = "top")
+p.lines
+p.lines <- p.lines +
+      geom_richtext(aes(x = -Inf, y = 4, label = lab_anova_gen, color = NULL),
+                    stat = "unique",
+                    fill = "white", label.color = "white",
+                    label.padding = grid::unit(c(0.5, 0.5, 0.5, 0.75), "lines"),
+                    hjust = 0, vjust = 0.5, size = 3,
+                    label.r = unit(0, "lines"), show.legend = FALSE)  +
+  ggtitle("Fungi") +
+  guides(color = guide_legend(direction = "horizontal")) +
+  theme(plot.title = element_text(size = 16, hjust = 0.01),
+        axis.title = element_text(size = 14),
+        legend.position = c(1, 1.05), 
+        legend.justification = "right",
+        legend.background = element_blank()) 
+
+p.lines
+
+```
+
+## Combine
+```{r}
+fig <- plot_grid(
+               p.lines,
+               p + theme(legend.position="none"),
+               labels = c("(a)", "(b)"),
+               align = "h",
+               nrow = 1, rel_widths = c(1, 0.6))
+
+fig
+
+p <- fig
+saveRDS(p, here("Data", "Interim", "Figures", "Shannon_both_fungi_stats.rds"))
+
+rm(list = c("p", "fig"))
+```
+
+
+# Richness
+## Seed source
+```{r}
+# Breeding material effect
+mod.mat <- lm(richness ~ breeding_material, data = d.alpha)
+Anova(mod.mat)
+summary(mod.mat)
+plot.mod.vg(mod.mat)
+
+lab_anova_source <- paste0("**ANOVA**<Br> Seed source: *R<sup>2</sup>* = ", signif(summary(mod.mat)$adj.r.squared*100, 2),"%;  *P* = ", signif(Anova(mod.mat)$`Pr(>F)`[1], 2))
+
+
+## Pairwise comparison
+emmeans(mod.mat, specs = pairwise ~ breeding_material) %>% 
+  .$contrasts %>%
+     rbind(adjust = "fdr") %>% 
+     summary(infer = TRUE)
+
+# calculate differences
+t.mult_cld <- multcomp::cld(emmeans(mod.mat, specs = ~ breeding_material), 
+                            Letters = letters, adjust = "fdr") %>% as.data.frame()
+
+t.pos_cld_ <- d.alpha %>%
+  group_by(breeding_material) %>% 
+  summarise(pos_cld = max(richness) + 5)
+
+t.cld <- left_join(t.mult_cld, t.pos_cld_)
+
+```
+
+```{r}
+## Richness
+p.bred <- d.alpha %>% 
+  mutate(breeding_material = factor(breeding_material, 
+                                    levels = c("gb", "bm", "cv"))) %>% 
+  ggplot(aes(x = breeding_material, 
+             y = richness))  +
+  geom_boxplot(outlier.colour = NA) +
+  geom_quasirandom(aes(color = breeding_material),
+                   dodge.width = 0.75, width = 0.15, alpha = 0.5,
+                   size = 2, show.legend = FALSE, shape = 16) +
+  stat_summary(fun = mean, 
+               geom = "point",
+               size = 2,
+               shape = 18) +
+  stat_summary(fun.data = mean_se, 
+               fun.args = list(mult = 1),
+               geom = "errorbar",
+               width = 0.3)  +
+  labs(x = "Seed source",
+       y = "OTU Richness") +
+  scale_x_discrete(labels = c(gb = "Gene bank",
+                              bm ="Breeding material",
+                              cv = "Cultivar")) +
+  scale_color_manual(values = c(gb = "#FFCC22", 
+                                bm = "#56B4E9", 
+                                cv = "#009E73")) 
+
+
+p <- p.bred +
+      geom_text(data = t.cld, aes(x = breeding_material, y = pos_cld, 
+                              label = trimws(.group)), size = 5) +
+      geom_richtext(aes(x = -Inf, y = 112.5, label = lab_anova_source),
+                    stat = "unique",
+                    fill = "white", label.color = "white",
+                    label.padding = grid::unit(c(0.5, 0.5, 0.5, 0.75), "lines"),
+                    hjust = 0, vjust = 0.5, size = 3,
+                    label.r = unit(0, "lines")) +  
+  ggtitle("Fungi") +
+  theme(plot.title = element_text(hjust = 0.05))
+
+p
+
+```
+
+
+## Genotype
+```{r}
+# Genotype effect
+mod.gen <- lm(richness ~ genotype, data = d.alpha)
+Anova(mod.gen)
+summary(mod.gen)$adj.r.square
+summary(mod.gen)$r.square
+plot.mod.vg(mod.gen)
+
+# lab_anova_gen <- paste0("**ANOVA**<Br> Genotype:  *P* = ", signif(Anova(mod.gen)$`Pr(>F)`[1], 2))
+lab_anova_gen <- paste0("**ANOVA**<Br> Genotype: *R<sup>2</sup>* = ", signif(summary(mod.gen)$adj.r.squared*100, 2),"%;  *P* = ", signif(Anova(mod.gen)$`Pr(>F)`[1], 2))
+
+
+## Richness
+v.sort <- d.alpha %>% 
+  mutate(breeding_material = factor(breeding_material, 
+                                    levels = c("gb", "bm", "cv"))) %>%
+  group_by(genotype) %>% 
+  summarise(
+    mean_richness = mean(richness, na.rm = TRUE)) %>% 
+  arrange(mean_richness) %>% 
+  pull(genotype) %>% unique()
+
+p.lines <- d.alpha %>% 
+  mutate(breeding_material = factor(breeding_material, 
+                                    levels = c("gb", "bm", "cv"))) %>%
+  mutate(genotype = factor(genotype, levels = v.sort))  %>% 
+  ggplot(aes(x = genotype, 
+             y = richness, color = breeding_material)) +
+  geom_point(alpha = 0.8, size = 0.5) +
+  stat_summary(fun = mean, 
+               geom = "point",
+               alpha = 0.5) +
+  stat_summary(fun.data = mean_se, 
+               fun.args = list(mult = 1),
+               geom = "errorbar",
+               linewidth  = 0.3,
+               width = 1.25) +
+  scale_color_manual(name = "Seed source",
+                     values = c(gb = "#FFCC22", 
+                                bm = "#56B4E9", 
+                                cv = "#009E73"),
+                     labels = c(gb = "Gene bank",
+                                bm = "Breeding material",
+                                cv = "Cultivar")) +
+  labs(y = "OTU Richness",
+       x = "Genotypes")  +
+  theme(panel.grid.major = element_blank(), 
+        panel.grid.major.y = element_line(linewidth = .1),
+        axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1, size = 1.75),
+        legend.position = "top")
+p.lines
+p.lines <- p.lines +
+      geom_richtext(aes(x = -Inf, y = 110, label = lab_anova_gen, color = NULL),
+                    stat = "unique",
+                    fill = "white", label.color = "white",
+                    label.padding = grid::unit(c(0.5, 0.5, 0.5, 0.75), "lines"),
+                    hjust = 0, vjust = 0.5, size = 3,
+                    label.r = unit(0, "lines"), show.legend = FALSE) +
+  ggtitle("Fungi") +
+  guides(color = guide_legend(direction = "horizontal")) +
+  theme(plot.title = element_text(size = 16, hjust = 0.01),
+        axis.title = element_text(size = 14),
+        legend.position = c(1, 1.05), 
+        legend.justification = "right",
+        legend.background = element_blank()) 
+
+
+```
+
+
+## Combine
+```{r}
+fig <- plot_grid(
+               p.lines,
+               p + theme(legend.position = "none"),
+               labels = c("(a)", "(b)"),
+               align = "h",
+               nrow = 1, rel_widths = c(1, 0.6))
+
+fig
+
+p <- fig
+saveRDS(p, here("Data", "Interim", "Figures", "Richness_both_fungi_stats.rds"))
+
+```
+
+# Alpha diversity and plant Resistance
+## Emergence
+```{r}
+# set global option for ggplot2
+theme_set(theme_bw(base_size = 14))
+
+# add emergence as factor
+d.alpha <- d.alpha %>%
+  mutate(emergence_f = factor(emergence))
+
+# Emergence
+## Richness
+p.alpha_emerg_rich <- d.alpha %>% 
+  ggplot(aes(x = emergence, 
+             y = richness)) +
+  geom_quasirandom(aes(fill = emergence_f),
+                   dodge.width = 0.7, width = 0.15, alpha = 0.5,
+                   size = 2, show.legend = FALSE, shape = 21) +
+  labs(x = "Emergence",
+       y = "OTU Richness") +
+  geom_smooth(method = "lm", formula = 'y ~ x', se = FALSE, color = "grey",
+              fullrange = TRUE) +
+  ggpubr::stat_cor(aes(label = 
+                         paste(after_stat(rr.label), after_stat(..p.label..),
+                               sep = "~`,`~")), method = "spearman",
+                   label.x.npc = "right", hjust = 1.1, vjust = -0.5)  +
+  scale_y_continuous(expand = expansion(mult = c(0.1, 0.15))) +
+  gg_fill_emerg() +
+  ggpubr::stat_regline_equation(label.x.npc = "left", vjust = -0.65)
+
+p.alpha_emerg_rich
+
+
+## Shannon
+p.alpha_emerg_shann <- d.alpha %>% 
+  ggplot(aes(x = emergence, 
+             y = shannon)) +
+  geom_quasirandom(aes(fill = emergence_f),
+                   dodge.width = 0.7, width = 0.15, alpha = 0.5,
+                   size = 2, show.legend = FALSE, shape = 21) +
+  labs(x = "Emergence",
+       y = "Shannon") +
+  geom_smooth(method = "lm", formula = 'y ~ x', se = FALSE, color = "black",
+              fullrange = TRUE) +
+  ggpubr::stat_cor(aes(label = 
+                         paste(after_stat(rr.label), after_stat(..p.label..),
+                               sep = "~`,`~")), method = "spearman",
+                   label.x.npc = "right", hjust = 1.1, vjust = -0.5) +
+  scale_y_continuous(expand = expansion(mult = c(0.1, 0.15))) +
+  gg_fill_emerg() +
+  ggpubr::stat_regline_equation(label.x.npc = "left", vjust = -0.65)
+
+
+p.alpha_emerg_shann
+
+```
+
+## RRI
+```{r}
+# RRI
+## Richness
+d.alpha <- d.alpha %>% 
+  mutate(RRI_f = factor(RRI))
+
+fill_rri <- d.alpha %>% 
+  mutate(RRI_col = case_when(
+    RRI < 3.5   ~ "#5ec962",
+    RRI < 4.5   ~ "#21918c",
+    RRI < 5.5   ~ "#3b528b",
+    TRUE        ~ "#440154"))  %>% pull(RRI_col, RRI_f)
+
+p.alpha_rri_rich <- d.alpha %>%  
+  ggplot(aes(x = RRI, 
+             y = richness)) +
+  geom_quasirandom(aes(fill = RRI_f),
+                   width = 0.15, alpha = 0.5,
+                   size = 2, show.legend = FALSE, shape = 21) +
+  labs(x = "RRI",
+       y = "OTU Richness") +
+  geom_smooth(method = "lm", formula = 'y ~ x', se = FALSE, color = "black",
+              fullrange = TRUE) +
+  ggpubr::stat_cor(aes(label = 
+                         paste(after_stat(rr.label), after_stat(..p.label..),
+                               sep = "~`,`~")), method = "spearman",
+                   label.x.npc = "right", hjust = 1.1, vjust = -0.5) +
+  scale_y_continuous(expand = expansion(mult = c(0.1, 0.15))) +
+  scale_fill_manual(values = fill_rri) +
+  ggpubr::stat_regline_equation(label.x.npc = "left", vjust = -0.65)
+
+  
+
+p.alpha_rri_rich
+
+
+## Shannon
+p.alpha_rri_shann <- d.alpha %>%  
+  ggplot(aes(x = RRI, 
+             y = shannon)) +
+  geom_quasirandom(aes(fill = RRI_f),
+                   width = 0.15, alpha = 0.5,
+                   size = 2, show.legend = FALSE, shape = 21) +
+  labs(x = "RRI",
+       y = "Shannon") +
+  geom_smooth(method = "lm", formula = 'y ~ x', se = FALSE, color = "darkgrey",
+              fullrange = TRUE) +
+  ggpubr::stat_cor(aes(label = 
+                         paste(after_stat(rr.label), after_stat(..p.label..),
+                               sep = "~`,`~")), method = "spearman",
+                   label.x.npc = "right", hjust = 1.1, vjust = -0.5) +
+  scale_y_continuous(expand = expansion(mult = c(0.1, 0.15))) +
+  scale_fill_manual(values = fill_rri) +
+  ggpubr::stat_regline_equation(label.x.npc = "left", vjust = -0.65)
+
+  
+
+p.alpha_rri_shann
+
+```
+
+
+## Combine
+```{r}
+# Shannon
+fig <- plot_grid(
+               p.alpha_emerg_shann + ggtitle("Fungi")+
+                 theme(legend.position="none",
+                       plot.title = element_text(hjust = 0.04)),
+               p.alpha_rri_shann + ggtitle("Fungi") +
+                 theme(legend.position="none",
+                       plot.title = element_text(hjust = 0.04)),
+               # labels = c("(a)", "(b)"),
+               align = "h",
+               nrow = 1, rel_widths = c(1, 1))
+
+fig
+
+# To save the data for the regression
+p <- plot_grid(fig)
+saveRDS(p, here("Data", "Interim", "Figures", "Shannon_resistance_fungi.rds"))
+
+rm(list = c("p", "fig"))
+```
+
+
+```{r}
+# Richness
+fig <- plot_grid(
+               p.alpha_emerg_rich + ggtitle("Fungi")+
+                 theme(legend.position="none",
+                       plot.title = element_text(hjust = 0.04)),
+               p.alpha_rri_rich + ggtitle("Fungi") +
+                 theme(legend.position="none",
+                       plot.title = element_text(hjust = 0.04)),
+               # labels = c("(a)", "(b)"),
+               align = "h",
+               nrow = 1, rel_widths = c(1, 1))
+
+fig
+
+
+# To save the data for the regression
+p <- plot_grid(fig)
+
+saveRDS(p, here("Data", "Interim", "Figures", "Richness_resistance_fungi.rds"))
+
+rm(list = c("p", "fig"))
+
+```
+
+
+```{r}
+
+```
+

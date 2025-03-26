@@ -1,0 +1,28 @@
+{
+    "id": "D882D82A",
+    "path": "~/data/R_Projects/__FOR_UPLOAD_PeaScreen17_Microbiome_25/Scripts/15_Heritability_ind_OTU_bacteria.Rmd",
+    "project_path": "Scripts/15_Heritability_ind_OTU_bacteria.Rmd",
+    "type": "r_markdown",
+    "hash": "1636555826",
+    "contents": "",
+    "dirty": false,
+    "created": 1739535968503.0,
+    "source_on_save": false,
+    "relative_order": 14,
+    "properties": {
+        "chunk_output_type": "console",
+        "source_window_id": "",
+        "Source": "Source",
+        "cursorPosition": "215,0",
+        "scrollLine": "0",
+        "docOutlineVisible": "1"
+    },
+    "folds": "",
+    "lastKnownWriteTime": 1739536265,
+    "encoding": "UTF-8",
+    "collab_server": "",
+    "source_window": "",
+    "last_content_update": 1739536265818,
+    "read_only": false,
+    "read_only_alternatives": []
+}

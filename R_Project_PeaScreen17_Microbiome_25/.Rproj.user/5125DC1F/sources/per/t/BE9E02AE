@@ -1,0 +1,28 @@
+{
+    "id": "BE9E02AE",
+    "path": "~/data/R_Projects/__FOR_UPLOAD_PeaScreen17_Microbiome_25/Scripts/22_Composite_figures.Rmd",
+    "project_path": "Scripts/22_Composite_figures.Rmd",
+    "type": "r_markdown",
+    "hash": "3268069940",
+    "contents": "",
+    "dirty": false,
+    "created": 1739543655965.0,
+    "source_on_save": false,
+    "relative_order": 19,
+    "properties": {
+        "chunk_output_type": "console",
+        "source_window_id": "",
+        "Source": "Source",
+        "cursorPosition": "395,0",
+        "scrollLine": "0",
+        "docOutlineVisible": "1"
+    },
+    "folds": "",
+    "lastKnownWriteTime": 1739544216,
+    "encoding": "UTF-8",
+    "collab_server": "",
+    "source_window": "",
+    "last_content_update": 1739544216557,
+    "read_only": false,
+    "read_only_alternatives": []
+}

@@ -1,0 +1,1656 @@
+---
+title: "Summarize all data on OTUs of both kingdoms"
+author: "Valentin Gfeller"
+date: "`r Sys.Date()`"
+output: 
+  html_document: 
+    toc: true
+    toc_float: true
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+#global knitter option
+knitr::opts_chunk$set(fig.align = "center", dev = 'svglite', echo = FALSE)
+
+# load packages
+library(tidyverse); packageVersion("tidyverse")
+library(phyloseq); packageVersion("phyloseq")
+library(vegan); packageVersion("vegan")
+library(ape); packageVersion("ape")
+library(here); packageVersion("here")
+library(readxl); packageVersion("readxl")
+library(ggpubr); packageVersion("ggpubr")
+library(nlme); packageVersion("nlme")
+library(lme4); packageVersion("lme4")
+library(knitr); packageVersion("knitr")
+library(cowplot); packageVersion("cowplot")
+library(factoextra); packageVersion("factoextra")
+library(FactoMineR); packageVersion("FactoMineR")
+library(ggbeeswarm); packageVersion("ggbeeswarm")
+library(car); packageVersion("car")
+library(emmeans); packageVersion("emmeans")
+library(cowplot); packageVersion("cowplot")
+library(UpSetR); packageVersion("UpSetR")
+library(flextable); packageVersion("flextable")
+
+
+# functions were written for repeatedly used code (see "/Scripts/Functions.R")
+# source functions
+source(here("Scripts", "Functions.R"))
+
+# set global option for ggplot2
+theme_set(theme_bw(base_size = 14))
+```
+
+# ## Summarize all attributes for OTUs and Samples ##
+# Summarize OTUs
+Create a table with information for each OTU.
+- Taxonomy
+- Relative abundance
+- Heritability
+- Prevalence (present in ... samples)
+- Degree and betweenness
+- Differential abundance (effect size, c(emergence, rri, RelDW, RelYield))
+
+## Fungi
+### Taxonomy and relative abundance
+```{r}
+load(here("Data", "Interim", "phy.fun_rel.RData"))
+phy.fun_rel
+
+# Extract taxonomy of each OTU
+t_tax <- tax_table(phy.fun_rel) %>% data.frame()
+
+# Check taxa at different levels
+t_tax %>% apply(., 2, unique)
+
+t_tax <- t_tax %>% rownames_to_column("OTU")
+
+# Extract relative abundance of each OTU 
+t.rel <- otu_table(phy.fun_rel) %>% 
+  rowMeans() %>% tibble(OTU = names(.), relative_abundance = .) %>% 
+  mutate(relative_abundance = as.numeric(relative_abundance)) %>% 
+  arrange(desc(relative_abundance))
+
+# Mean abundance (%)
+t.rel %>% pull(relative_abundance) %>% mean(.)
+
+# Median abundance (%)
+t.rel %>% pull(relative_abundance) %>% median(.)
+
+# Total abundance (%)
+t.rel %>% pull(relative_abundance) %>% sum(.)
+
+# Top abundant OTUs (%)
+t.rel %>% slice_max(relative_abundance, n = 10)
+
+# Combine with previous data frame
+d.otu_fun <- t_tax %>%
+  left_join(., t.rel)
+
+```
+
+### Heritability
+```{r}
+t.otu_herit <- read_csv(file = here("Data", "Interim", "heritability_otu_fun.csv"))
+
+# Check how many OTUs are heritable
+table(t.otu_herit$heritable)
+
+# Select column of interest
+t.otu_herit <- t.otu_herit %>% select(OTU, heritability)
+
+# Combine with previous data frame
+d.otu_fun <- d.otu_fun %>%
+  left_join(., t.otu_herit)
+
+```
+
+
+### Prevalence
+```{r}
+t.otu_prev <- readRDS(file = here("Data", "Interim", "Prevalence_OTUs_fun.rds")) %>% 
+  data.frame(OTU = names(.), prevalence = .)
+
+# Look at most prevalent taxa
+t.otu_prev %>% slice_max(abs(prevalence), n = 15)
+
+# Combine with previous data frame
+d.otu_fun <- d.otu_fun %>%
+  left_join(., t.otu_prev)
+
+```
+
+### OTUs correlated with disease resistance
+```{r}
+t.otu_da <- read_csv(file = here("Data", "Interim", "da_otu_fun.csv"))
+
+# Combine with previous data frame
+d.otu_fun <- d.otu_fun %>%
+  left_join(., t.otu_da)
+
+```
+
+
+## Bacteria
+### Taxonomy and relative abundance
+```{r}
+load(here("Data", "Interim", "phy.bac.rel.RData"))
+phy.bac.rel
+
+# Extract taxonomy of each OTU
+t_tax <- tax_table(phy.bac.rel) %>% data.frame()
+
+# Check taxa at different levels
+t_tax %>% apply(., 2, unique)
+
+t_tax <- t_tax %>% rownames_to_column("OTU")
+
+# Extract relative abundance of each OTU 
+t.rel <- otu_table(phy.bac.rel) %>% 
+  rowMeans() %>% tibble(OTU = names(.), relative_abundance = .) %>%
+  mutate(relative_abundance = as.numeric(relative_abundance)) %>% 
+  arrange(desc(relative_abundance))
+
+# Mean abundance
+t.rel %>% pull(relative_abundance) %>% mean(.)
+
+# Median abundance
+t.rel %>% pull(relative_abundance) %>% median(.)
+
+# Total abundance
+t.rel %>% pull(relative_abundance) %>% sum(.)
+
+# Top abundant OTUs
+t.rel %>% slice_max(relative_abundance, n = 10)
+
+# Combine with previous data frame
+d.otu_bac <- t_tax %>%
+  left_join(., t.rel)
+
+```
+
+### Heritability
+```{r}
+t.otu_herit <- read_csv(file = here("Data", "Interim", "heritability_otu_bac.csv"))
+
+# Check how many OTUs are heritable
+table(t.otu_herit$heritable)
+
+# Select column of interest
+t.otu_herit <- t.otu_herit %>% select(OTU, heritability)
+
+# Combine with previous data frame
+d.otu_bac <- d.otu_bac %>%
+  left_join(., t.otu_herit)
+
+```
+
+### Prevalence
+```{r}
+t.otu_prev <- readRDS(file = here("Data", "Interim", "Prevalence_OTUs_bac.rds")) %>% 
+  data.frame(OTU = names(.), prevalence = .)
+
+# Look at most prevalent taxa
+t.otu_prev %>% slice_max(abs(prevalence), n = 15)
+
+# Combine with previous data frame
+d.otu_bac <- d.otu_bac %>%
+  left_join(., t.otu_prev)
+
+```
+
+### OTUs correlated with disease resistance
+```{r}
+t.otu_da <- read_csv(file = here("Data", "Interim", "da_otu_bac.csv"))
+
+# Combine with previous data frame
+d.otu_bac <- d.otu_bac %>%
+  left_join(., t.otu_da)
+
+```
+
+
+# Combine fungi and bacteria
+```{r}
+# Combine with previous data frame
+d.otu <- d.otu_fun %>%
+  bind_rows(., d.otu_bac)
+
+```
+
+```{r}
+# Load phyloseq object with fungi and bacteria
+load(here("Data", "Interim", "phy.comb_all.RData"))
+```
+
+
+### Network characteristics
+```{r}
+t.otu_hub <- read_csv(file = here("Data", "Interim", "Hub_taxa_both_kingdoms.csv"))
+
+# Combine with relative abundance
+d.otu <- d.otu %>%
+  left_join(., t.otu_hub)
+
+# Find OTUs that have no measure of betweenness or degree
+v.na <- c(d.otu %>% filter(is.na(betweenness)) %>%
+    pull(OTU), d.otu %>% filter(is.na(degree)) %>%
+  pull(OTU)) %>%
+  unique()
+
+# change from NA to 0 for nodes with no connections
+d.otu <- d.otu %>% 
+  mutate(
+    degree = case_when(
+    OTU %in% v.na ~ 0,
+    TRUE ~ degree),
+    top10_bn = case_when(
+    OTU %in% v.na ~ FALSE,
+    TRUE ~ top10_bn))
+
+```
+
+## Correlate individual variables
+```{r}
+# Emergence
+p.herit_da_cor <- d.otu %>% 
+  mutate(direction = case_when(
+    spearman.erho_emergence < 0 ~ "Negative",
+    spearman.erho_emergence > 0 ~ "Positive")) %>% 
+  ggplot(aes(heritability, spearman.erho_emergence, color = direction)) +
+  geom_point(aes(heritability, spearman.erho_emergence, 
+                 color = direction, fill = Kingdom), 
+             shape = 21, alpha = 0.6, size = 2) +
+  geom_smooth(method = "lm", se = FALSE) +
+  stat_cor(aes(label = paste(..rr.label.., ..p.label.., sep = "~`,`~"))) +
+  labs(x = "Heritability (%)",
+       y = "Correlation with emergence") +
+  scale_fill_manual(name = "Domain",
+                     values = c("Fungi" = "darkgrey", 
+                                "Bacteria" = "black")) +
+  scale_color_manual(name = "Effect direction",
+                     values = c("Negative" = "#440154", 
+                                "Positive" = "#5ec962")) + ggpubr::stat_regline_equation(label.y.npc = "bottom",
+                                               label.x.npc = "left")
+
+p.herit_da_cor + geom_label(data = d.otu %>% 
+                              filter(heritability>40 & 
+                                       abs(spearman.erho_emergence) < 0.2 ),
+                            aes(label = OTU, color = NULL))
+d.otu %>% 
+  filter(heritability>40 & 
+           abs(spearman.erho_emergence) < 0.2 )
+
+
+# Add panel label and save
+p_save <- plot_grid(p.herit_da_cor)
+saveRDS(p_save, here("Data", "Interim", "Figures", "Herit_daCor_combined.rds"))
+
+
+# RRI
+d.otu %>% 
+  mutate(direction = case_when(
+    spearman.erho_RRI < 0 ~ "Negative",
+    spearman.erho_RRI > 0 ~ "Positive")) %>% 
+  ggplot(aes(heritability, spearman.erho_RRI, color = direction)) +
+  geom_point(aes(fill = Kingdom), 
+             shape = 21, alpha = 0.6, size = 2) +
+  geom_smooth(method = "lm", se = FALSE) +
+  stat_cor(aes(label = paste(..rr.label.., ..p.label.., sep = "~`,`~"))) +
+  labs(x = "Heritability (%)",
+       y = "Correlation with RRI") +
+  scale_fill_manual(name = "Domain",
+                     values = c("Fungi" = "darkgrey", 
+                                "Bacteria" = "black"))+
+  scale_color_manual(name = "Effect direction",
+                     values = c("Negative" = "#5ec962", 
+                                "Positive" = "#440154"))
+
+```
+
+```{r}
+
+d.otu %>% 
+  filter(spearman.eBH_emergence < 0.0001 | spearman.eBH_RRI < 0.0001 & 
+           spearman.erho_emergence < 0 & heritability > 20 & 
+           relative_abundance > 0.1) %>% 
+  slice_max(desc(spearman.eBH_emergence + spearman.eBH_RRI), n = 35)
+
+```
+
+# Plots
+## Heritability
+### Individual OTUs
+```{r}
+t.otu_herit_b <- read_csv(file = here("Data", "Interim", "heritability_otu_bac.csv")) %>% 
+  mutate(Kingdom = "bacteria")
+t.otu_herit_f <- read_csv(file = here("Data", "Interim", "heritability_otu_fun.csv")) %>% 
+  mutate(Kingdom = "fungi")
+
+t.otu_herit_comb <- bind_rows(t.otu_herit_b, t.otu_herit_f) %>%
+  arrange(desc(heritability))
+
+# How many OTUs have a heritbality above 20%?
+t.otu_herit_comb %>%
+  filter(heritability > 20) %>% 
+  nrow()
+
+# Plot them
+t.otu_herit_comb_red <- t.otu_herit_comb %>%
+  slice_max(heritability, n = 58) %>% 
+  mutate(Kingdom = factor(Kingdom, levels = c("fungi", "bacteria"))) %>% 
+  mutate(OTU = factor(OTU, levels = OTU)) 
+
+p.herit <- t.otu_herit_comb_red %>% 
+  ggplot(aes(OTU, heritability, color = Kingdom)) +
+  geom_point(show.legend = FALSE) +
+  geom_errorbar(aes(ymin = CI_low, ymax = CI_high), width = 0.25, show.legend = FALSE) +
+  scale_y_continuous(limits = c(0, 83), expand = expansion(mult = c(0, 0))) +
+  ylab("Heritability %") +
+  scale_color_manual(values = c("fungi" = "darkgrey", 
+                                "bacteria" = "black"),
+                     labels = c("fungi" = "Fungi", 
+                                "bacteria" = "Bacteria")) + 
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1, size = 6.5))
+
+p.herit
+
+# Indicate the ones that are related to disease resistance
+## Get daOTUs
+v.da_interstect_all_fun <- readRDS(here("Data", "Interim", "DA_fun_OTUs_intersect_all_phenotypes.rds"))
+v.da_interstect_all_bac <- readRDS(here("Data", "Interim", "DA_bac_OTUs_intersect_all_phenotypes.rds"))
+v.da_interstect_all <- c(v.da_interstect_all_fun, v.da_interstect_all_bac)
+## Get direction of correlation
+
+d.otu_cor <- d.otu %>% filter(OTU %in% v.da_interstect_all) %>% 
+  mutate(Effect_direction = case_when(spearman.erho_emergence > 0 ~ "Positive",
+                                      spearman.erho_emergence < 0 ~ "Negative"),
+         Effect_direction = factor(Effect_direction, levels = c("Positive", "Negative"))) %>% 
+  select(OTU, Effect_direction)
+
+t.otu_herit_comb_red_cor <- t.otu_herit_comb_red %>% 
+  filter(OTU %in% v.da_interstect_all) %>% 
+  left_join(., d.otu_cor)
+
+p.herit <- p.herit +
+  ggnewscale::new_scale_color() +
+  geom_point(data = t.otu_herit_comb_red_cor, 
+             aes(OTU, heritability, color = Effect_direction),
+             shape = 21, size = 2.5, stroke = 0.75, alpha = 1) +
+  scale_color_manual(name = "Effect direction",
+                     values = c("Negative" = "#440154", 
+                                "Positive" = "#5ec962")) +
+  theme(legend.position = c(1, 1),
+        legend.justification = c(1.01, 1.01))
+
+
+p.herit
+
+
+# Are there significantly more fungi than bacteria in the top 58 heritable OTUs?
+# Observed count
+t.otu_herit_comb %>%
+  filter(heritability > 20) %>% 
+  pull(Kingdom) %>% table()
+
+successes <- 48
+trials <- 58
+# Expected proportion
+expected_proportion <- 0.5
+# Perform the binomial test
+binom.test(successes, trials, expected_proportion, alternative = "two.sided")
+
+
+# Are fungi overall more heritable
+t.otu_herit_comb %>% 
+  group_by(Kingdom) %>% 
+  summarise(mean = mean(heritability),
+            median = median(heritability))
+
+t.test(heritability ~ Kingdom, data = t.otu_herit_comb)
+
+# correct for more low abundant
+t.test(heritability ~ Kingdom,
+       data = bind_rows(t.otu_herit_b %>% 
+                          slice_max(n = dim(t.otu_herit_f)[1], 
+                                    order_by = heritability), t.otu_herit_f))
+t.test(heritability ~ Kingdom,
+       data = bind_rows(t.otu_herit_b %>% 
+                          slice_sample(n = dim(t.otu_herit_f)[1]), t.otu_herit_f))
+
+# same with wilcox.tes
+# Are fungi overall more heritable
+wilcox.test(heritability ~ Kingdom, data = t.otu_herit_comb)
+# correct for more low abundant
+wilcox.test(heritability ~ Kingdom,
+       data = bind_rows(t.otu_herit_b %>% 
+                          slice_max(n = dim(t.otu_herit_f)[1], 
+                                    order_by = heritability), t.otu_herit_f))
+wilcox.test(heritability ~ Kingdom,
+       data = bind_rows(t.otu_herit_b %>% 
+                          slice_sample(n = dim(t.otu_herit_f)[1]), t.otu_herit_f))
+
+t.otu_herit_comb %>% 
+  ggplot(aes(Kingdom, heritability)) +
+  geom_boxplot(outlier.colour = NA) +
+  geom_quasirandom(width = 0.2, alpha = 0.25)
+
+
+t.otu_herit_comb %>%      
+  filter(OTU %in% c("fOTU285", "fOTU1508", "fOTU860", "bOTU1", "bOTU28"))
+
+```
+
+### Diversity
+```{r}
+d.div_herit_bac <- read_csv(file = here("Data", "Interim",
+                                        "heritability_diversity_bacteria.csv")) %>% 
+  mutate(Kingdom = "bacteria")
+                                   
+d.div_herit_fun <- read_csv(file = here("Data", "Interim", 
+                                        "heritability_diversity_fungi.csv")) %>% 
+  mutate(Kingdom = "fungi")
+
+
+d.diversity_herit_comb <- bind_rows(d.div_herit_bac, d.div_herit_fun) %>% 
+  mutate(diversity = str_replace(diversity, "bacteria ", ""),
+         diversity = str_replace(diversity, "fungi ", ""),
+         Heritability = Heritability * 100,
+         `CI lower` = `CI lower` * 100,
+         `CI upper` = `CI upper` * 100) %>% 
+  mutate(Diversity = case_when(
+    str_detect(diversity, "Beta") ~ "Beta diversity",
+    str_detect(diversity, "Alpha") ~ "Alpha diversity",
+    TRUE ~ diversity),
+    diversity_index = case_when(
+      str_detect(diversity, "OTU Richness")  ~ "OTU Richness",
+      str_detect(diversity, "Shannon")       ~ "Shannon",
+      str_detect(diversity, "PCo axis 1")    ~ "PCo axis 1",
+      str_detect(diversity, "PCo axis 2")    ~ "PCo axis 2",
+      TRUE ~ diversity))
+
+p.herit_div <- d.diversity_herit_comb %>% 
+  mutate(Kingdom = factor(Kingdom, levels = c("fungi", "bacteria"))) %>% 
+  ggplot(aes(diversity, Heritability, color = Kingdom)) +
+  geom_point(position = position_dodge(width = 0.3)) +
+  geom_errorbar(aes(ymin = `CI lower`, ymax = `CI upper`), width = 0.15,
+                position = position_dodge(width = 0.3)) +
+  scale_y_continuous(limits = c(0, 83), expand = expansion(mult = c(0, 0))) +
+  ylab("Heritability %") +
+  scale_color_manual(name = "Domain",
+                     values = c("fungi" = "darkgrey", 
+                                "bacteria" = "black"),
+                     labels = c("fungi" = "Fungi", 
+                                "bacteria" = "Bacteria")) + 
+  theme(axis.title.x = element_blank(),
+        axis.text.x = element_text(angle = 5, vjust = 0.5, hjust = 0.5))
+p.herit_div
+
+
+# new with subset
+p.herit_div <- d.diversity_herit_comb %>% 
+  mutate(Kingdom = factor(Kingdom, levels = c("fungi", "bacteria"))) %>% 
+  ggplot(aes(diversity_index, Heritability, color = Kingdom)) +
+  geom_point(position = position_dodge(width = 0.3)) +
+  geom_errorbar(aes(ymin = `CI lower`, ymax = `CI upper`), width = 0.15,
+                position = position_dodge(width = 0.3)) +
+  scale_y_continuous(limits = c(0, 83), expand = expansion(mult = c(0, 0))) +
+  ylab("Heritability %") +
+  scale_color_manual(name = "Domain",
+                     values = c("fungi" = "darkgrey", 
+                                "bacteria" = "black"),
+                     labels = c("fungi" = "Fungi", 
+                                "bacteria" = "Bacteria")) + 
+  theme(axis.title.x = element_blank()) +
+  facet_wrap(vars(Diversity),
+             scales = "free_x",
+             switch = "x") +
+  theme(panel.spacing = unit(0, units = "cm"), 
+        strip.placement = "outside", 
+        strip.background = element_rect(color = "white", fill = "white")) +
+  ggh4x::force_panelsizes(cols = c(1, 1)) 
+
+p.herit_div
+
+
+```
+
+
+### Combine
+```{r}
+fig <- plot_grid(p.herit_div,
+                 p.herit,
+                 # labels = c("(a)", "(b)"),
+                 align = "v",
+                 nrow = 2) +
+            draw_plot_label(label = c("(a)", "(b)"),
+                            y = c(1, 0.5),    
+                            hjust = 0,
+                            size = 14)
+fig
+
+
+saveRDS(fig, here("Data", "Interim", "Figures", "Heritability_all_combined.rds"))
+```
+
+## Differential abundance individual OTUs (effect size and p value)
+### Get an overview of most OTUs that are most assosiated with diesease resistance
+```{r}
+# Top DA OTUs 
+## Emergence
+(tab.mostDA_emerg <- d.otu %>% slice_max(abs(spearman.erho_emergence), n = 30) %>% 
+  select(OTU, Kingdom, Phylum, Family, Genus, relative_abundance,
+         heritability, spearman.erho_emergence, spearman.eBH_emergence))
+tab.mostDA_emerg %>% group_by(Kingdom) %>% summarise(n = n())
+
+## RRI
+(tab.mostDA_rri <- d.otu %>% slice_max(abs(spearman.erho_RRI), n = 30) %>% 
+  select(OTU, Kingdom, Phylum, Family, Genus, relative_abundance,
+         heritability, spearman.erho_RRI, spearman.eBH_RRI))
+tab.mostDA_rri %>% group_by(Kingdom) %>% summarise(n = n())
+
+## SDWrel
+(tab.mostDA_sdr <- d.otu %>% slice_max(abs(spearman.erho_sdr), n = 30) %>% 
+  select(OTU, Kingdom, Phylum, Family, Genus, relative_abundance,
+         heritability, spearman.erho_sdr, spearman.eBH_sdr))
+tab.mostDA_sdr %>% group_by(Kingdom) %>% summarise(n = n())
+
+## tSDWrel
+(tab.mostDA_syr <- d.otu %>% slice_max(abs(spearman.erho_syr), n = 30) %>% 
+  select(OTU, Kingdom, Phylum, Family, Genus, relative_abundance,
+         heritability, spearman.erho_syr, spearman.eBH_syr))
+tab.mostDA_syr %>% group_by(Kingdom) %>% summarise(n = n())
+
+```
+
+```{r}
+# Plot relative abundance
+load(here("Data", "Interim", "phy.fun_rel.RData"))
+d.samp <- psmelt(phy.fun_rel) 
+
+# select only the OTUs that are significantly da for all phenotypes
+da_int_bac <- readRDS(here("Data", "Interim", "DA_bac_OTUs_intersect_all_phenotypes.rds"))
+da_int_fun <- readRDS(here("Data", "Interim", "DA_fun_OTUs_intersect_all_phenotypes.rds"))
+da_int_both <- c(da_int_bac, da_int_fun)
+
+d.samp <- d.samp %>% 
+  filter(OTU %in% da_int_both)
+
+
+```
+
+### Subset data to OTUs of most interest
+Decide on which ones to plot 
+- Relative abundance (> 1%)
+- Heritability (Top 10%)
+- Degree or betweenness (Top 10%)
+- Differential abundance (correlation, c(emergence, rri, RelDW, RelYield)) (*for one of the phenotypes top 10%*)
+
+```{r}
+## Top 10% Heritability
+top_herit <- d.otu %>% arrange(desc(heritability)) %>% 
+  head(n = nrow(.) * 0.1) %>% pull(OTU)
+
+## Degree or betweenness in top 10%
+top_hub <- d.otu %>% filter(top10_bn == TRUE | top10_dg == TRUE ) %>% pull(OTU)
+# top_hub <- d.otu %>% filter(top10_both == TRUE) %>% pull(OTU)
+
+## Combine and subset da data frame
+top_herit_hub <- intersect(top_herit, top_hub)
+
+# For at least one of the phenotypes in the top 10% of OTUs for correlation with resistance phenotype (differential abundant)
+top_10_phen <- c(d.otu %>% arrange(desc(abs(spearman.erho_emergence))) %>%
+    head(n = nrow(.) * 0.1) %>% pull(OTU),
+  d.otu %>% arrange(desc(abs(spearman.erho_RRI))) %>% 
+    head(n = nrow(.) * 0.1) %>% pull(OTU),
+  d.otu %>% arrange(desc(abs(spearman.erho_sdr))) %>%
+    head(n = nrow(.) * 0.1) %>% pull(OTU),
+  d.otu %>% arrange(desc(abs(spearman.erho_syr))) %>%
+    head(n = nrow(.) * 0.1) %>% pull(OTU)) %>% unique()
+
+# Only OTUs with a mean relative abundance of at least 0.1%
+ top_abundant <- d.otu %>% 
+  filter(relative_abundance > 1) %>% pull(OTU)
+
+# Visualize intersections
+ l.otu_of_interest <- list(top_hub = top_hub,
+                           top_herit = top_herit,
+                           # all_otus = d.otu %>% pull(OTU),
+                           top_abundant = top_abundant,
+                           top_10_phen = top_10_phen)
+
+p.upset <- upset(fromList(l.otu_of_interest), order.by = "freq", 
+                 nsets = 6, nintersects = NA,
+                 point.size = 2.5,
+                 text.scale = c(1.3, 1, 1.15, 1, 1.3, 1))
+ 
+p.upset
+
+# Prepare data frame
+d.otu_da_red <- d.otu %>% 
+  filter(OTU %in% top_herit_hub) %>% 
+  filter(OTU %in% top_10_phen)%>% 
+  filter(OTU %in% top_abundant) %>% 
+  arrange(spearman.erho_emergence)
+
+d.otu_da_red# They are also hubs
+
+d.otu_da_red %>% str()
+
+
+# Check how they are correlated
+load(here("Data", "Interim", "phy.comb_clr_all.RData"))
+d.clr_red <- phy.comb_clr %>% otu_table() %>% data.frame() %>% t() %>% data.frame() %>% 
+  select(d.otu_da_red$OTU) 
+
+```
+
+### Continuous clr transformed values
+```{r}
+load(here("Data", "Interim", "phy.comb_clr_all.RData"))
+
+# Tidy data frame for visualization
+d.samp <- psmelt(phy.comb_clr)
+
+# subset data
+d.samp_red <- d.samp %>% 
+  filter(OTU %in% d.otu_da_red$OTU) %>% 
+  mutate(OTU = factor(OTU, levels = d.otu_da_red$OTU))
+
+# Emergence
+p.emerg <- d.samp_red %>% 
+  mutate(Emergence = factor(emergence)) %>% 
+  ggplot(aes(x = emergence, y = Abundance)) +
+  facet_wrap(vars(OTU), scales = "free", nrow = 2) +
+  geom_quasirandom(aes(x = emergence, y = Abundance, color = Emergence),
+                   width = 0.1, alpha = 0.5) +
+  geom_smooth(method = "lm", se = FALSE, color = "black") +
+  stat_cor(aes(label = paste(after_stat(rr.label), after_stat(p.label), sep = "~`,`~")),
+           method = "spearman", size = 2.75, label.y = Inf, vjust = 1.5) +
+  gg_col_emerg() +
+  theme_bw(base_size = 12) +
+  theme(legend.position = c(0.9, 0.25),
+        strip.background = element_rect(fill = "grey95"),
+        axis.title=element_text(size = 12)) +
+  scale_y_continuous(expand = expansion(mult = c(0.1, 0.20))) +
+  xlab("Emergence") +
+  ylab("Abundance (clr-transformed)")
+
+p.emerg
+
+# Save ordination
+# Add panel label and save
+p_save <- plot_grid(p.emerg, labels = "(e)")
+saveRDS(p_save, here("Data", "Interim", "Figures", "Cor_OTU_emergence.rds"))
+
+
+## RRI
+### divide in three groups for visualization (<=3, 3.5-4, >4.5)
+d.samp_red$RRI_g[d.samp_red$RRI<=3] <- 3
+d.samp_red$RRI_g[d.samp_red$RRI >3 &
+                                d.samp_red$RRI < 4.5] <- 4
+d.samp_red$RRI_g[d.samp_red$RRI >4] <- 5
+
+## adjust order by correlation with RRI
+# subset data
+ord_RRI <- d.otu_da_red %>% 
+  arrange(spearman.erho_RRI) %>% pull(OTU)
+
+d.samp_red <- d.samp_red %>% 
+  mutate(OTU = factor(OTU, levels = ord_RRI))
+
+# plot
+p.RRI <- d.samp_red %>% 
+  mutate(RRI_g = factor(RRI_g)) %>% 
+  ggplot(aes(x = RRI, y = Abundance)) +
+  facet_wrap(vars(OTU), scales = "free", nrow = 2) +
+  geom_quasirandom(aes(x = RRI, y = Abundance, color = RRI_g),
+                   width = 0.1, alpha = 0.5) +
+  geom_smooth(method = "lm", se = FALSE, color = "black") +
+  stat_cor(aes(label = paste(after_stat(rr.label), after_stat(p.label), sep = "~`,`~")),
+           method = "spearman", size = 2.75, label.y = Inf, vjust = 1.5) +
+  gg_col_RRI_g() +
+  theme_bw(base_size = 12) +
+  theme(legend.position = c(0.9, 0.25),
+        strip.background = element_rect(fill = "grey95"),
+        axis.title=element_text(size = 12)) +
+  scale_y_continuous(expand = expansion(mult = c(0.1, 0.20))) +
+  xlab("RRI") +
+  ylab("Abundance (clr-transformed)")
+p.RRI
+
+
+# Save ordination
+# Add panel label and save
+p_save <- plot_grid(p.RRI)
+saveRDS(p_save, here("Data", "Interim", "Figures", "Cor_OTU_RRI.rds"))
+```
+
+# Can we improve the prediction (R2) of disease resistance when inclduing multiple OTUs and or beta diversity measures?
+## Select samples present in bacterial and fungal dataset and combine data
+```{r}
+load(here("Data", "Interim", "phy.comb_clr_all.RData"))
+load(here("Data", "Interim", "phy.fun_clr.RData"))
+load(here("Data", "Interim", "phy.bac_clr.RData"))
+
+# Look at data
+phy.bac_clr %>% sample_data() %>% pull(name.ngs_long) %>% .[1:20]
+phy.fun_clr %>% sample_data() %>% pull(name.ngs) %>% .[1:20]
+
+# Adjust names to combine the two
+tab.samp_bact <- phy.bac_clr %>% sample_data() %>% pull(name.ngs_long) %>% 
+  str_replace("_16S", "") %>% 
+  str_replace("REP", "Rep")
+data.frame(x = sample_data(phy.bac_clr)$name.ngs_long, y = tab.samp_bact) %>% slice_sample(n = 20)
+sample_data(phy.bac_clr)$name.ngs_long <- tab.samp_bact
+sample_names(phy.bac_clr) <- tab.samp_bact
+
+tab.samp_fung <- phy.fun_clr %>% sample_data() %>% pull(name.ngs)
+data.frame(x = sample_names(phy.fun_clr), y = tab.samp_fung) %>% slice_sample(n = 20)
+sample_names(phy.fun_clr) <- tab.samp_fung
+
+# Subset samples to the ones present in bacteria and fungi (intersect)
+to_keep <- intersect(tab.samp_bact, tab.samp_fung)
+
+phy.bac_clr_red <- subset_samples(phy.bac_clr, name.ngs_long %in% to_keep)
+phy.fun.clr_red <-  subset_samples(phy.fun_clr,  name.ngs %in% to_keep)
+
+# Check number of lost samples
+phy.bac_clr %>% sample_data() %>% dim() %>% .[1]
+phy.fun_clr %>% sample_data() %>% dim() %>% .[1]
+phy.bac_clr_red %>% sample_data() %>% dim() %>% .[1]
+phy.fun.clr_red %>% sample_data() %>% dim() %>% .[1]
+
+# combine dataframe
+d.bact_red <- phy.bac_clr_red %>% otu_table() %>% data.frame()
+d.fun_red  <- phy.fun.clr_red  %>% otu_table() %>% data.frame()
+all.equal(d.bact_red %>% colnames() %>% sort(), d.fun_red %>% colnames() %>% sort())
+
+d.otu_comb <- bind_rows(d.bact_red, d.fun_red)
+m.otu_comb <- d.otu_comb %>% as.matrix()
+
+phy.comb <- phyloseq(otu_table(m.otu_comb, taxa_are_rows = TRUE),
+                     sample_data(phy.fun.clr_red))
+
+```
+
+## Emergence
+### Beta diversity + 20 most abundant OTUs of each domain 
+```{r}
+# Select most abundant OTUs
+top20fun <- psmelt(phy.fun.clr_red) %>%  
+  filter(str_detect(OTU, "fO")) %>% 
+  group_by(OTU) %>% 
+  summarize(Abundance = mean(Abundance)) %>% 
+  slice_max(Abundance, n = 20)
+
+top20bac <- psmelt(phy.bac_clr_red) %>%
+  filter(str_detect(OTU, "bO")) %>% 
+  group_by(OTU) %>% 
+  summarize(Abundance = mean(Abundance)) %>% 
+  slice_max(Abundance, n = 20)
+
+top20_comb <- c(top20fun %>% pull(OTU), top20bac %>% pull(OTU))
+
+# subset data
+d.samp_red2 <- psmelt(phy.comb)
+d.samp_top20each <- d.samp_red2 %>% 
+  filter(OTU %in% top20_comb)
+
+d.samp_top20each %>% str
+
+#Add diversity
+# Fungi
+t.diversity_fung <- read_delim(
+  file = here("Data", "Interim", "diversity_fun.csv"),
+  delim = ",") %>% 
+  mutate(Sample = paste0(pea_line, "_Rep", Replicate)) %>% 
+  select(Sample, "Richness_fun" = Richness, "Shannon_fun" = Shannon, "PCoA_1_fun" = PCoA_1, "PCoA_2_fun" = PCoA_2)
+
+d.comb_fun <- left_join(d.samp_red2, t.diversity_fung)
+
+# Something does not match. What is going on?
+d.samp_red2$Sample %>% unique() %>% sort() %>% length()
+t.diversity_fung$Sample %>% unique() %>% sort() %>% length()
+
+x = list("d.samp" =  d.samp_red2$Sample %>% unique() %>% sort(),
+         "t.diversity_fun" = t.diversity_fung$Sample %>% unique() %>% sort())
+
+ggvenn::ggvenn(
+  x, 
+  fill_color = c("#0073C2FF", "#EFC000FF"),
+  stroke_size = 0.5, set_name_size = 4)
+
+full_join(d.samp_red2, t.diversity_fung) %>% filter(is.na(PCoA_1_fun)) %>% pull(Sample) %>% unique()
+full_join(d.samp_red2, t.diversity_fung) %>% filter(is.na(emergence)) %>% pull(Sample) %>% unique()
+
+# Adjust sample name in t.diversity
+t.diversity_fung <- read_delim(
+  file = here("Data", "Interim", "diversity_fun.csv"),
+  delim = ",") %>% 
+  mutate(Sample = paste0(pea_line, "_Rep", Replicate)) %>% 
+  select(Sample, "Richness_fun" = Richness, "Shannon_fun" = Shannon, 
+         "PCoA_1_fun" = PCoA_1, "PCoA_2_fun" = PCoA_2) %>% 
+  mutate(Sample = case_when(
+    Sample == "C1_Rep1" ~ "C1_1_1NS_Rep1",
+    Sample == "C1_Rep2" ~ "C1_1_1NS_Rep2",
+    Sample == "C1_Rep3" ~ "C1_1_1NS_Rep3",
+    Sample == "C1_Rep4" ~ "C1_1_1NS_Rep4",
+    Sample == "C2_Rep1" ~ "C2_2_1NS_Rep1",
+    Sample == "C2_Rep2" ~ "C2_2_1NS_Rep2",
+    Sample == "C2_Rep3" ~ "C2_2_1NS_Rep3",
+    Sample == "C2_Rep4" ~ "C2_2_1NS_Rep4",
+    TRUE ~ Sample)) %>% 
+  filter(Sample != "G29_Rep3")
+
+d.comb_fun <- left_join(d.samp_red2, t.diversity_fung)
+
+# Check again
+d.samp_red2$Sample %>% unique() %>% sort() %>% length()
+t.diversity_fung$Sample %>% unique() %>% sort() %>% length()
+
+x = list("d.samp" =  d.samp_red2$Sample %>% unique() %>% sort(),
+         "t.diversity_fun" = t.diversity_fung$Sample %>% unique() %>% sort())
+
+ggvenn::ggvenn(
+  x, 
+  fill_color = c("#0073C2FF", "#EFC000FF"),
+  stroke_size = 0.5, set_name_size = 4)
+
+full_join(d.samp_red2, t.diversity_fung) %>% filter(is.na(PCoA_1_fun)) %>% pull(Sample) %>% unique()
+full_join(d.samp_red2, t.diversity_fung) %>% filter(is.na(emergence)) %>% pull(Sample) %>% unique()
+```
+
+
+```{r}
+# Bacteria
+t.diversity_full <- read_delim(
+  file = here("Data", "Interim", "diversity_bac.csv"),
+  delim = ",") %>% 
+  mutate(Sample = paste0(pea_line, "_Rep", Replicate)) %>% 
+  select(Sample, "Richness_bac" = Richness, "Shannon_bac" = Shannon, "PCoA_1_bac" = PCoA_1, "PCoA_2_bac" = PCoA_2)
+
+d.comb <- left_join(d.comb_fun, t.diversity_full, by = "Sample")
+
+# Something does not match. What is going on?
+d.comb$Sample %>% unique() %>% sort() %>% length()
+t.diversity_full$Sample %>% unique() %>% sort() %>% length()
+
+x = list("d.samp" =  d.comb$Sample %>% unique() %>% sort(),
+         "t.diversity_fun" = t.diversity_full$Sample %>% unique() %>% sort())
+
+ggvenn::ggvenn(
+  x, 
+  fill_color = c("#0073C2FF", "#EFC000FF"),
+  stroke_size = 0.5, set_name_size = 4)
+
+full_join(d.comb_fun, t.diversity_full, by = "Sample") %>% filter(is.na(PCoA_1_bac)) %>% pull(Sample) %>% unique()
+full_join(d.comb_fun, t.diversity_full, by = "Sample") %>% filter(is.na(emergence)) %>% pull(Sample) %>% unique()
+
+
+# Adjust sample name in t.diversity
+t.diversity_full <- read_delim(
+  file = here("Data", "Interim", "diversity_bac.csv"),
+  delim = ",") %>% 
+  mutate(Sample = paste0(pea_line, "_Rep", Replicate)) %>% 
+  select(Sample, "Richness_bac" = Richness, "Shannon_bac" = Shannon, "PCoA_1_bac" = PCoA_1, "PCoA_2_bac" = PCoA_2) %>% 
+  mutate(Sample = case_when(
+    Sample == "C1_Rep1" ~ "C1_1_1NS_Rep1",
+    Sample == "C1_Rep2" ~ "C1_1_1NS_Rep2",
+    Sample == "C1_Rep3" ~ "C1_1_1NS_Rep3",
+    Sample == "C1_Rep4" ~ "C1_1_1NS_Rep4",
+    Sample == "C2_Rep1" ~ "C2_2_1NS_Rep1",
+    Sample == "C2_Rep2" ~ "C2_2_1NS_Rep2",
+    Sample == "C2_Rep3" ~ "C2_2_1NS_Rep3",
+    Sample == "C2_Rep4" ~ "C2_2_1NS_Rep4",
+    TRUE ~ Sample)) %>% 
+  filter(!Sample %in% c("G6_Rep4", "G14_Rep4", "G17_Rep1", "G33_Rep4",
+                        "G43_Rep1", "S23_Rep1", "S65_Rep3", "S74_Rep3", "S78_Rep3", "S89_Rep3",
+                        "S90_Rep1", "S98_Rep3", "S107_Rep3", "S109_Rep1", "S116_Rep3",
+                        "S137_Rep3", "S147_Rep3", "S155_Rep3", "S169_Rep3", "S177_Rep3",
+                        "S190_Rep3", "S197_Rep3", "U4_Rep3", "U8_Rep3", "X2_Rep3"))
+
+# Check again
+d.comb <- left_join(d.comb_fun, t.diversity_full, by = "Sample")
+
+# Something does not match. What is going on?
+d.comb$Sample %>% unique() %>% sort() %>% length()
+t.diversity_full$Sample %>% unique() %>% sort() %>% length()
+
+x = list("d.samp" =  d.comb$Sample %>% unique() %>% sort(),
+         "t.diversity_fun" = t.diversity_full$Sample %>% unique() %>% sort())
+
+ggvenn::ggvenn(
+  x, 
+  fill_color = c("#0073C2FF", "#EFC000FF"),
+  stroke_size = 0.5, set_name_size = 4)
+
+full_join(d.comb_fun, t.diversity_full, by = "Sample") %>% filter(is.na(PCoA_1_bac)) %>% pull(Sample) %>% unique()
+full_join(d.comb_fun, t.diversity_full, by = "Sample") %>% filter(is.na(emergence)) %>% pull(Sample) %>% unique()
+
+```
+
+
+```{r}
+# Emergence
+d.comb_wide <- d.comb %>% 
+  filter(OTU %in% d.samp_top20each$OTU) %>% 
+  pivot_wider(names_from  =  OTU, values_from = Abundance) %>% 
+  select(emergence, contains("OTU"), PCoA_1_bac, PCoA_2_bac,
+         PCoA_1_fun, PCoA_2_fun)
+
+## Full model
+mod.full_OTU_beta <- lm(emergence ~ ., data = d.comb_wide) 
+summary(mod.full_OTU_beta)
+
+# Reduced model
+mod.step_OTU_beta <-  MASS::stepAIC(mod.full_OTU_beta)
+summary(mod.step_OTU_beta)
+Anova(mod.step_OTU_beta)
+plot.mod.vg(mod.step_OTU_beta)
+mod.step_OTU_beta$anova
+
+```
+
+
+### 20 most abundant OTUs of each domain
+```{r}
+# Emergence
+d.comb_wide_OTU <- d.comb %>% 
+  filter(OTU %in% d.samp_top20each$OTU) %>% 
+  pivot_wider(names_from  =  OTU, values_from = Abundance) %>% 
+  select(emergence, contains("OTU"))
+
+## Full model
+mod.full_OTU <- lm(emergence ~ ., data = d.comb_wide_OTU) 
+summary(mod.full_OTU)
+
+# Reduced model
+mod.step_OTU <-  MASS::stepAIC(mod.full_OTU)
+summary(mod.step_OTU)
+Anova(mod.step_OTU)
+plot.mod.vg(mod.step_OTU)
+mod.step_OTU$anova
+
+
+# Reduced model with full dataset (as the other models; for AIC calcualtions)
+mod.step_OTU <- lm(emergence ~ fOTU1508 + fOTU1063 + bOTU2 + bOTU7 + fOTU731 + fOTU340 + 
+    bOTU11 + bOTU9 + bOTU18 + bOTU33 + fOTU1092 + fOTU712, data = d.comb_wide) 
+summary(mod.step_OTU)
+
+```
+
+
+### Beta diversity only
+```{r}
+lm(emergence ~ PCoA_1_fun, data = d.comb_wide) %>% summary() %>% .$adj.r.squared
+lm(emergence ~ PCoA_2_fun, data = d.comb_wide) %>% summary() %>% .$adj.r.squared 
+lm(emergence ~ PCoA_1_bac, data = d.comb_wide) %>% summary() %>% .$adj.r.squared 
+lm(emergence ~ PCoA_2_bac, data = d.comb_wide) %>% summary() %>% .$adj.r.squared 
+
+mod.PCoA_1_fun <- lm(emergence ~ PCoA_1_fun, data = d.comb_wide) 
+summary(mod.PCoA_1_fun)
+Anova(mod.PCoA_1_fun)
+plot.mod.vg(mod.PCoA_1_fun)
+```
+
+### Most descriptive OTU only
+```{r}
+mod.OTU_fun <- lm(emergence ~ fOTU1508, data = d.comb_wide) 
+summary(mod.OTU_fun)
+Anova(mod.OTU_fun)
+plot.mod.vg(mod.OTU_fun)
+```
+
+### Compare models and summarize
+```{r}
+#AIC
+t.aic <- AIC(mod.step_OTU_beta,
+    mod.step_OTU,
+    mod.PCoA_1_fun,
+    mod.OTU_fun) %>% data.frame() %>% rownames_to_column("model")
+
+#BIC
+t.bic <- BIC(mod.step_OTU_beta,
+    mod.step_OTU,
+    mod.PCoA_1_fun,
+    mod.OTU_fun) %>% data.frame() %>% rownames_to_column("model")
+
+# adjusted R2
+step_OTU_beta_r2 <- mod.step_OTU_beta %>% summary() %>% .$adj.r.squared
+step_OTU_r2 <- mod.step_OTU %>% summary() %>% .$adj.r.squared
+PCoA_1_fun_r2 <- mod.PCoA_1_fun %>% summary() %>% .$adj.r.squared
+OTU_fun_r2 <- mod.OTU_fun %>% summary() %>% .$adj.r.squared
+
+d.r2 <- c(step_OTU_beta_r2, step_OTU_r2, PCoA_1_fun_r2, OTU_fun_r2)
+
+# P-value
+step_OTU_beta_p <- mod.step_OTU_beta %>% summary()%>% .$fstatistic %>% 
+  {unname(pf(.[1], .[2], .[3], lower.tail = F))}
+step_OTU_p <- mod.step_OTU %>% summary() %>% .$fstatistic %>% 
+  {unname(pf(.[1], .[2], .[3], lower.tail = F))}
+PCoA_1_fun_p <- mod.PCoA_1_fun %>% summary() %>% .$fstatistic %>% 
+  {unname(pf(.[1], .[2], .[3], lower.tail = F))}
+OTU_fun_p <- mod.OTU_fun %>% summary() %>% .$fstatistic %>% 
+  {unname(pf(.[1], .[2], .[3], lower.tail = F))}
+
+d.p <- c(step_OTU_beta_p, step_OTU_p, PCoA_1_fun_p, OTU_fun_p)
+
+# nr_variables
+step_OTU_beta_nr_variables <- mod.step_OTU_beta %>% coef() %>% length-1
+step_OTU_nr_variables <- mod.step_OTU %>% coef() %>% length-1
+PCoA_1_fun_nr_variables <- mod.PCoA_1_fun %>% coef() %>% length-1
+OTU_fun_nr_variables <- mod.OTU_fun %>% coef() %>% length-1
+
+d.nr_variables <- c(step_OTU_beta_nr_variables, step_OTU_nr_variables,
+                    PCoA_1_fun_nr_variables, OTU_fun_nr_variables)
+
+
+# check if it is the same as summary
+lm(emergence ~ bOTU12, data = d.comb_wide) %>% summary()
+lm(emergence ~ bOTU12, data = d.comb_wide) %>% summary() %>% .$fstatistic %>% 
+  {unname(pf(.[1], .[2], .[3], lower.tail = F))}
+
+
+# Combine everything to a table
+t.comb_bic <- left_join(t.aic, t.bic) %>%
+  data.frame(., adjusted_R2 = d.r2, p_value = d.p, nr_variables = d.nr_variables)
+
+t.comb <- t.comb_bic %>%  select(-BIC, -df) %>% 
+  mutate(AIC = round(AIC, 1),
+         adjusted_R2 = signif(adjusted_R2, 3)*100,
+         p_value = signif(p_value, 3),
+         model = case_when(
+           model == "mod.step_OTU_beta" ~ "Stepwise regression OTUs and PCoA axes",
+           model == "mod.step_OTU" ~ "Stepwise regression OTUs",
+           model == "mod.PCoA_1_fun" ~ "PCoA axis 1 of fungi",
+           model == "mod.OTU_fun" ~ "fOTU1508"))
+
+t.comb
+```
+
+### Save table
+```{r}
+# Convert to character
+t.comb_chr <- t.comb %>% mutate(across(where(is.numeric), as.character)) %>% tibble()
+
+# Create table
+t.flex_model_comparison_emergence_ <- t.comb_chr %>% 
+  rename("Model" = model, "Nvariables" = nr_variables,
+         'Adjusted R^2 (%)' = adjusted_R2, "*P* value" = p_value) %>% 
+  select(Model, Nvariables, everything()) %>% 
+  flextable() %>% 
+  theme_apa() %>% 
+  separate_header() %>% 
+  autofit()
+```
+
+#### add footnotes
+```{r}
+# Add footnotes
+t.flex_model_comparison_emergence <- footnote(t.flex_model_comparison_emergence_, i = c(1, 2), j = c(1),
+            value = as_paragraph(
+              c(coef(mod.step_OTU_beta) %>% names() %>% .[-1] %>% paste(., collapse =', ') %>% 
+                  paste(" Variables in final model:", .),
+                coef(mod.step_OTU) %>% names() %>% .[-1] %>% paste(., collapse =', ') %>% 
+                  paste(" Variables in final model:", .))),
+            ref_symbols = c("A", "B"),
+            part = "body", inline = FALSE, sep = "; ")
+
+t.flex_model_comparison_emergence
+
+t.flex_model_comparison_emergence_ <- t.flex_model_comparison_emergence
+
+t.flex_model_comparison_emergence_ <- set_table_properties(t.flex_model_comparison_emergence_, width = 1, layout = "autofit") %>% 
+  fontsize(size = 3.5, part = "all")
+```
+
+```{r}
+# Save table
+t.flex_model_comparison_emergence <- set_table_properties(t.flex_model_comparison_emergence_, 
+                                                          width = 1, layout = "autofit") %>% 
+  fontsize(size = 10, part = "all")
+
+# Save table
+save_as_docx(t.flex_model_comparison_emergence, 
+  path = here("Output", "Table_model_comparison_emergence.docx"))
+
+
+```
+
+
+
+
+
+## RRI
+### Beta diversity + 20 most abundant OTUs of each domain 
+```{r}
+# RRI
+d.comb_wide <- d.comb %>% 
+  filter(OTU %in% d.samp_top20each$OTU) %>% 
+  pivot_wider(names_from  =  OTU, values_from = Abundance) %>% 
+  select(RRI, contains("OTU"), PCoA_1_bac, PCoA_2_bac,
+         PCoA_1_fun, PCoA_2_fun)
+
+## Full model
+mod.full_OTU_beta <- lm(RRI ~ ., data = d.comb_wide) 
+summary(mod.full_OTU_beta)
+
+# Reduced model
+mod.step_OTU_beta <-  MASS::stepAIC(mod.full_OTU_beta)
+summary(mod.step_OTU_beta)
+Anova(mod.step_OTU_beta)
+plot.mod.vg(mod.step_OTU_beta)
+mod.step_OTU_beta$anova
+
+```
+
+
+### 20 most abundant OTUs of each domain
+```{r}
+# RRI
+d.comb_wide_OTU <- d.comb %>% 
+  filter(OTU %in% d.samp_top20each$OTU) %>% 
+  pivot_wider(names_from  =  OTU, values_from = Abundance) %>% 
+  select(RRI, contains("OTU"))
+
+## Full model
+mod.full_OTU <- lm(RRI ~ ., data = d.comb_wide_OTU) 
+summary(mod.full_OTU)
+
+# Reduced model
+mod.step_OTU <-  MASS::stepAIC(mod.full_OTU)
+summary(mod.step_OTU)
+Anova(mod.step_OTU)
+plot.mod.vg(mod.step_OTU)
+mod.step_OTU$anova
+
+
+# Reduced model with full dataset (as the other models; for AIC calcualtions)
+mod.step_OTU <- lm(RRI ~ bOTU1 + fOTU1508 + fOTU1517 + bOTU5 + fOTU1598 + bOTU15 +
+                     fOTU731 + fOTU1450 + fOTU174 + bOTU6 + bOTU21 + fOTU1557 +
+                     bOTU16 + bOTU9 + bOTU13 + fOTU630 + fOTU1092 + fOTU1556 +
+                     bOTU12, data = d.comb_wide) 
+summary(mod.step_OTU)
+
+```
+
+
+### Beta diversity only
+```{r}
+lm(RRI ~ PCoA_1_fun, data = d.comb_wide) %>% summary() %>% .$adj.r.squared 
+lm(RRI ~ PCoA_2_fun, data = d.comb_wide) %>% summary() %>% .$adj.r.squared 
+lm(RRI ~ PCoA_1_bac, data = d.comb_wide) %>% summary() %>% .$adj.r.squared 
+lm(RRI ~ PCoA_2_bac, data = d.comb_wide) %>% summary() %>% .$adj.r.squared 
+
+mod.PCoA_1_bac <- lm(RRI ~ PCoA_1_bac, data = d.comb_wide) 
+summary(mod.PCoA_1_bac)
+Anova(mod.PCoA_1_bac)
+plot.mod.vg(mod.PCoA_1_bac)
+```
+
+### Most descriptive OTU only
+```{r}
+lm(RRI ~ ., data = d.comb_wide) %>% step()
+mod.OTU_bac <- lm(RRI ~ bOTU1, data = d.comb_wide) 
+summary(mod.OTU_bac)
+Anova(mod.OTU_bac)
+plot.mod.vg(mod.OTU_bac)
+```
+
+### Compare models and summarize
+```{r}
+#AIC
+t.aic <- AIC(mod.step_OTU_beta,
+    mod.step_OTU,
+    mod.PCoA_1_bac,
+    mod.OTU_bac) %>% data.frame() %>% rownames_to_column("model")
+
+#BIC
+t.bic <- BIC(mod.step_OTU_beta,
+    mod.step_OTU,
+    mod.PCoA_1_bac,
+    mod.OTU_bac) %>% data.frame() %>% rownames_to_column("model")
+
+# adjusted R2
+step_OTU_beta_r2 <- mod.step_OTU_beta %>% summary() %>% .$adj.r.squared
+step_OTU_r2 <- mod.step_OTU %>% summary() %>% .$adj.r.squared
+PCoA_1_bac_r2 <- mod.PCoA_1_bac %>% summary() %>% .$adj.r.squared
+OTU_bac_r2 <- mod.OTU_bac %>% summary() %>% .$adj.r.squared
+
+d.r2 <- c(step_OTU_beta_r2, step_OTU_r2, PCoA_1_bac_r2, OTU_bac_r2)
+
+# P-value
+step_OTU_beta_p <- mod.step_OTU_beta %>% summary()%>% .$fstatistic %>% 
+  {unname(pf(.[1], .[2], .[3], lower.tail = F))}
+step_OTU_p <- mod.step_OTU %>% summary() %>% .$fstatistic %>% 
+  {unname(pf(.[1], .[2], .[3], lower.tail = F))}
+PCoA_1_bac_p <- mod.PCoA_1_bac %>% summary() %>% .$fstatistic %>% 
+  {unname(pf(.[1], .[2], .[3], lower.tail = F))}
+OTU_bac_p <- mod.OTU_bac %>% summary() %>% .$fstatistic %>% 
+  {unname(pf(.[1], .[2], .[3], lower.tail = F))}
+
+d.p <- c(step_OTU_beta_p, step_OTU_p, PCoA_1_bac_p, OTU_bac_p)
+
+# nr_variables
+step_OTU_beta_nr_variables <- mod.step_OTU_beta %>% coef() %>% length-1
+step_OTU_nr_variables <- mod.step_OTU %>% coef() %>% length-1
+PCoA_1_bac_nr_variables <- mod.PCoA_1_bac %>% coef() %>% length-1
+OTU_bac_nr_variables <- mod.OTU_bac %>% coef() %>% length-1
+
+d.nr_variables <- c(step_OTU_beta_nr_variables, step_OTU_nr_variables,
+                    PCoA_1_bac_nr_variables, OTU_bac_nr_variables)
+
+
+# check if it is the same as summary
+lm(RRI ~ bOTU12, data = d.comb_wide) %>% summary()
+lm(RRI ~ bOTU12, data = d.comb_wide) %>% summary() %>% .$fstatistic %>% 
+  {unname(pf(.[1], .[2], .[3], lower.tail = F))}
+
+
+# Combine everything to a table
+t.comb_bic <- left_join(t.aic, t.bic) %>%
+  data.frame(., adjusted_R2 = d.r2, p_value = d.p, nr_variables = d.nr_variables)
+
+t.comb <- t.comb_bic %>%  select(-BIC, -df) %>% 
+  mutate(AIC = round(AIC, 1),
+         adjusted_R2 = signif(adjusted_R2, 3)*100,
+         p_value = signif(p_value, 3),
+         model = case_when(
+           model == "mod.step_OTU_beta" ~ "Stepwise regression OTUs and PCoA axes",
+           model == "mod.step_OTU" ~ "Stepwise regression OTUs",
+           model == "mod.PCoA_1_bac" ~ "PCoA axis 1 of bacteria",
+           model == "mod.OTU_bac" ~ "bOTU1"))
+
+t.comb
+
+```
+
+### Save table
+```{r}
+# Convert to character
+t.comb_chr <- t.comb %>% mutate(across(where(is.numeric), as.character)) %>% tibble()
+
+# Create table
+t.flex_model_comparison_RRI_ <- t.comb_chr %>% 
+  rename("Model" = model, "Nvariables" = nr_variables,
+         'Adjusted R^2 (%)' = adjusted_R2, "*P* value" = p_value) %>% 
+  select(Model, Nvariables, everything()) %>% 
+  flextable() %>% 
+  theme_apa() %>% 
+  separate_header() %>% 
+  autofit()
+```
+
+#### add footnote
+```{r}
+t.flex_model_comparison_RRI <- footnote(t.flex_model_comparison_RRI_, i = c(1, 2), j = c(1),
+            value = as_paragraph(
+              c(coef(mod.step_OTU_beta) %>% names() %>% .[-1] %>% paste(., collapse =', ') %>% 
+                  paste(" Variables in final model:", .),
+                coef(mod.step_OTU) %>% names() %>% .[-1] %>% paste(., collapse =', ') %>% 
+                  paste(" Variables in final model:", .))),
+            ref_symbols = c("A", "B"),
+            part = "body", inline = FALSE, sep = "; ")
+
+t.flex_model_comparison_RRI
+
+t.flex_model_comparison_RRI_ <- t.flex_model_comparison_RRI
+
+t.flex_model_comparison_RRI_ <- set_table_properties(t.flex_model_comparison_RRI_, width = 1, layout = "autofit") %>% 
+  fontsize(size = 3.5, part = "all")
+
+
+
+
+```
+
+
+```{r}
+# Save table
+t.flex_model_comparison_RRI <- set_table_properties(t.flex_model_comparison_RRI_, 
+                                                          width = 1, layout = "autofit") %>% 
+  fontsize(size = 10, part = "all")
+
+# Save table
+save_as_docx(t.flex_model_comparison_RRI, 
+  path = here("Output", "Table_model_comparison_RRI.docx"))
+
+
+```
+
+
+```{r}
+# Look at rank abundance curve
+d.otu %>% 
+  mutate(rank = rank(desc(relative_abundance))) %>% 
+  slice_min(order_by = rank, n = 50) %>% 
+  ggplot(aes(rank, relative_abundance)) +
+  geom_point()
+
+
+# OTU prevalence
+p.prevalence <- d.otu %>% 
+  mutate(rank = rank(desc(relative_abundance))) %>% 
+  ggplot(aes(rank, prevalence, fill = Kingdom)) +
+  geom_point(shape = 21, alpha = 0.6, size = 2) +
+  labs(y = "OTU prevalence (%)",
+       x = "OTU relative abundance rank") +
+  scale_fill_manual(name = "Domain",
+                     values = c("Fungi" = "darkgrey", 
+                                "Bacteria" = "black"))
+
+# Indicate most important OTUs
+# subset data
+selected_otus <- d.otu %>% 
+  mutate(rank = rank(desc(relative_abundance))) %>% 
+  filter(OTU %in% d.otu_da_red$OTU)
+
+p.prevalence <- p.prevalence +
+  geom_point(data = selected_otus, 
+             aes(rank, prevalence, fill = Kingdom),  color = "darkred",
+             fill = NA, shape = 21, size = 4, stroke = 0.75, alpha = 0.75) 
+
+# try zoomed-in plot
+p.full <- p.prevalence
+# zoomed plot
+p.zoom <- p.prevalence + coord_cartesian(xlim = c(-1, 100), ylim = c(85, 100.5)) +
+  theme(legend.position = "none",
+        axis.title.x = element_blank(), axis.title.y = element_blank(),
+        axis.text = element_text(size = 8), plot.margin = unit(c(1,1,1,1),"mm"))
+
+# Grob
+g <- ggplotGrob(p.zoom)
+
+# put them together
+p.comb <- p.full + annotation_custom(grob = g, xmin = 500, xmax = 1255, ymin = 45, ymax = 102) + 
+  geom_rect(aes(xmin = -10, xmax = 103, ymin = 84, ymax = 102), fill = NA,
+            color = "black", linewidth = 0.2)
+p.comb
+
+
+# Add panel label and save
+p_save <- plot_grid(p.comb)
+saveRDS(p_save, here("Data", "Interim", "Figures", "Prevalence_combined.rds"))
+
+```
+
+
+## Table with all attributes for the manuscript
+```{r}
+d.samp_red %>% str
+
+tab_otu_of_interest <- d.otu_da_red %>%
+  arrange(factor(factor(OTU, levels = c("fOTU860", "fOTU1450", "fOTU1557",
+                                        "bOTU15", "bOTU5", "fOTU1598",
+                                        "bOTU1", "fOTU22", "bOTU4",
+                                        "fOTU1517", "fOTU1508")))) %>% 
+  mutate(across(where(is.numeric),  ~signif(., 3)),
+         across(where(is.character), ~ replace_na(., "unassigned")),
+         spearman.eBH_emergence = case_when(spearman.eBH_emergence < 0.001 ~ "< 0.001",
+                                            TRUE ~ as.character(round(spearman.eBH_emergence, 3))),
+         spearman.eBH_RRI = case_when(spearman.eBH_RRI < 0.001 ~ "< 0.001",
+                                      TRUE ~ as.character(round(spearman.eBH_RRI, 3))),
+         across(where(is.numeric),  ~round(., 3))) %>% 
+  select("OTU id" = OTU, Kingdom, Phylum, Family, Genus, Species,
+         "Relative abundance" = relative_abundance,
+         "Heritability" = heritability,
+         "Prevalence (%)" = prevalence,
+         "Degree" = degree,
+         "Betweenness" = betweenness,
+         "Emergence cor" = spearman.erho_emergence,
+         "Emergence p" = spearman.eBH_emergence,
+         "RRI cor" = spearman.erho_RRI,
+         "RRI p" = spearman.eBH_RRI,
+         ) %>% 
+  mutate(Best_blast_hit = c(
+    "Fusarium sp.", 
+    "Fusarium sp.",
+    "Helotiales (Order)",
+    "Rhizobium sp.",
+    "Pseudomonas sp.",
+    "Fusarium sp.",
+    "Rhizobium sp.",
+    "Olpidium sp.",
+    "Streptomyces sp.",
+    "Dactylonectria sp.",
+    "Dactylonectria sp." )) %>% 
+  select(1:5, Best_blast_hit, everything()) %>% 
+  select(-c(Species, Kingdom)) %>% 
+  mutate(Genus = case_when(
+    Genus == "Allorhizobium-Neorhizobium-Pararhizobium-Rhizobium" ~ "Rhizobium",
+    TRUE ~ Genus))
+
+# Literature: Pseudomonas, Fusarium and Streptomyces can have positive or negative effects on plant growth
+# Literature: Helotiales  sp. (Order) were also found to affect plant performance positively or negatively
+
+```
+
+
+```{r}
+# Convert to character
+tab_otu_of_interest_chr <- tab_otu_of_interest %>% mutate(across(where(is.numeric), as.character)) %>% tibble()
+
+colnames(tab_otu_of_interest_chr) <- colnames(tab_otu_of_interest_chr) %>% str_replace(" ", "_")
+
+t.flex_otus_of_interest <- tab_otu_of_interest_chr %>%
+  rename("Blast hit" = Best_blast_hit,
+         "RA (%)" = Relative_abundance,
+         "Heritability (%)" = Heritability,
+         "OTU id" = OTU_id) %>% 
+  flextable() %>% 
+  theme_apa() %>% 
+  separate_header()  %>% 
+  autofit()
+
+# Add footnotes
+t.flex_otus_of_interest <- footnote(t.flex_otus_of_interest, i = c(1), j = c(5, 6),
+            value = as_paragraph(
+              c("Top hit of a BLAST search against the NCBI database", "Within-Kingdom relative abundance was computed for each OTU")),
+            ref_symbols = c("A", "B"),
+            part = "header", inline = TRUE) %>% footnote(., i = c(4, 7), j = c(4),
+            value = as_paragraph(
+              c("`Rhizobium` refers to the genus `Allorhizobium-Neorhizobium-Pararhizobium-Rhizobium`")),
+            ref_symbols = c("*"),
+            part = "body") %>% 
+  theme_apa() %>% 
+  align(align = "left", part = c("footer")) %>%
+  valign(valign = "bottom", part = "header")
+
+t.flex_otus_of_interest
+
+t.flex_otus_of_interest_ <- t.flex_otus_of_interest
+
+t.flex_otus_of_interest_ <- set_table_properties(t.flex_otus_of_interest_, width = 1, layout = "autofit") %>% 
+  fontsize(size = 3.5, part = "all")
+
+save_as_docx(t.flex_otus_of_interest_, 
+  path = here("Output", "Table_OTU_of_interest.docx"))
+
+```
+
+
+# Check OTUs of potential taxonomic interest
+```{r}
+# Fusarium
+tab_fus <- d.otu %>% 
+  filter(Genus == "Fusarium")
+tab_fus
+
+tab.interest <- tab_fus %>% 
+  mutate(Best_blast_hit =case_when(
+    OTU == "fOTU860" ~ "Fusarium sp.",
+    OTU == "fOTU419" ~ "Fusarium sp.",
+    OTU == "fOTU137" ~ "Fusarium redolens",
+    OTU == "fOTU680" ~ "Fusarium sp.",
+    OTU == "fOTU334" ~ "Fusarium venenatum",
+    OTU == "fOTU329" ~ "",
+    OTU == "fOTU487" ~ "Fusarium sp.",
+    TRUE  ~    "Fusarium sp.")) %>% 
+  select(1:8, Best_blast_hit, everything())
+
+# Glomeromycota (Check while knowing that our primers do not well amplify Glomeromycota)
+tab_glo <- d.otu %>% 
+  filter(Phylum %in% "Glomeromycota") %>% 
+  mutate(Best_blast_hit =case_when(
+    OTU == "fOTU1020" ~ "")) 
+tab_glo
+
+tab.interest <- bind_rows(tab.interest, tab_glo)
+
+# Clonostachys
+d.otu %>% 
+  filter(Genus == "Clonostachys")
+
+tab_clo <- d.otu %>% 
+  filter(Family == "Bionectriaceae") %>% # BLASTn fOTU60: possibly Clonostachys rosea
+  mutate(Best_blast_hit =case_when(
+    OTU == "fOTU60" ~ "Clonostachys rosea"))  
+tab_clo
+
+tab.interest <- bind_rows(tab.interest, tab_clo)
+
+
+# Didymellaceae
+d.otu %>% 
+  filter(Genus == "Didymella")
+
+tab_did <- d.otu %>% 
+  filter(Family == "Didymellaceae") %>%  # BLASTn fOTU40:  possibly Ascochyta pisi (Didymella pisi is the teliomorph stage of Ascochyta pisi)
+  filter(OTU == "fOTU40")   %>%          # BLASTn fOTU1350: no hit and also not correlated with disease resistance
+  mutate(Best_blast_hit =case_when(
+    OTU == "fOTU40" ~ "Ascochyta pisi"))             
+
+d.samp_red2 %>% 
+  filter(OTU == "fOTU40") %>%
+  group_by(genotype) %>% 
+  summarise(n = sum(!is.na(Abundance)), Abundance = mean(Abundance, na.rm = TRUE)) %>% 
+  filter(n > 3) %>% 
+  slice_max(Abundance, n = 20)
+
+d.samp_red2 %>% 
+  filter(OTU == "fOTU40") %>%
+  group_by(genotype) %>% 
+  summarise(n = sum(!is.na(Abundance)), Abundance = mean(Abundance, na.rm = TRUE)) %>% 
+  filter(n > 3) %>% 
+  slice_min(Abundance, n = 20)
+
+d.samp_red2 %>% 
+  filter(Abundance < 0) 
+
+tab_did
+tab.interest <- bind_rows(tab.interest, tab_did)
+
+
+# Rhizoctonia
+d.otu %>%
+  filter(Phylum %in% "Rhizoctonia")
+
+tab.rhizc <- d.otu %>% 
+  filter(Family == "Ceratobasidiaceae") %>%  # BLASTn fOTU831: possibly Rhizoctonia
+  filter(OTU %in%                            # BLASTn fOTU578: possibly Rhizoctonia or Ceratobasidium
+           c("fOTU831", "fOTU578",           # BLASTn fOTU335: possibly Ceratobasidium (synonym of Rhizoctonia, https://doi.org/10.1007/s11557-013-0936-0)
+             "fOTU335", "fOTU140")) %>%      # BLASTn fOTU140: possibly Rhizoctonia (probaly solani)
+  mutate(Best_blast_hit =case_when(
+    OTU == "fOTU831" ~ "Rhizoctonia sp.",
+    OTU == "fOTU578" ~ "Rhizoctonia sp.",
+    OTU == "fOTU335" ~ "Ceratobasidium sp.",
+    OTU == "fOTU140" ~ "Rhizoctonia sp."))  
+                                        
+tab.rhizc
+tab.interest <- bind_rows(tab.interest, tab.rhizc)
+
+# Remove OTU already present in Table 1
+intersect(tab.interest %>% pull(OTU), d.otu_da_red %>% pull(OTU))
+tab.interest <- 
+  tab.interest %>% 
+  filter(!OTU %in% c("fOTU860")) %>% 
+  arrange(spearman.erho_emergence)
+
+```
+
+
+```{r}
+tab.interest %>% str
+
+tab.interest_tidy <- tab.interest %>%
+  arrange(factor(factor(OTU, levels = OTU))) %>% 
+  mutate(across(where(is.numeric),  ~signif(., 3)),
+         across(where(is.character), ~ replace_na(., "unassigned")),
+         spearman.eBH_emergence = case_when(spearman.eBH_emergence < 0.001 ~ "< 0.001",
+                                            TRUE ~ as.character(round(spearman.eBH_emergence, 3))),
+         spearman.eBH_RRI = case_when(spearman.eBH_RRI < 0.001 ~ "< 0.001",
+                                      TRUE ~ as.character(round(spearman.eBH_RRI, 3))),
+         across(where(is.numeric),  ~round(., 3))) %>% 
+  select("OTU id" = OTU, Kingdom, Phylum, Family, Genus, Species,
+         "Relative abundance" = relative_abundance,
+         "Heritability" = heritability,
+         "Prevalence (%)" = prevalence,
+         "Degree" = degree,
+         "Betweenness" = betweenness,
+         "Emergence cor" = spearman.erho_emergence,
+         "Emergence p" = spearman.eBH_emergence,
+         "RRI cor" = spearman.erho_RRI,
+         "RRI p" = spearman.eBH_RRI,
+         Best_blast_hit) %>% 
+  select(1:5, Best_blast_hit, everything()) %>% 
+  select(-c(Species, Kingdom)) %>% 
+  mutate(Genus = case_when(
+    Genus == "Allorhizobium-Neorhizobium-Pararhizobium-Rhizobium" ~ "Rhizobium",
+    TRUE ~ Genus))
+
+# Literature: Pseudomonas, Fusarium and Streptomyces can have positive or negative effects on plant growth
+# Literature: Helotiales  sp. (Order) were also found to affect plant performance positively or negatively
+
+```
+
+
+```{r}
+# better solution: as character
+tab.interest_tidy_chr <- tab.interest_tidy %>% mutate(across(where(is.numeric), as.character)) %>% tibble()
+
+colnames(tab.interest_tidy_chr) <- colnames(tab.interest_tidy_chr) %>% str_replace(" ", "_")
+
+t.flex_taxa_of_interest <- tab.interest_tidy_chr %>%
+  rename("Blast hit" = Best_blast_hit,
+         "RA (%)" = Relative_abundance,
+         "Heritability (%)" = Heritability,
+         "OTU id" = OTU_id) %>% 
+  flextable() %>% 
+  theme_apa() %>% 
+  separate_header()  %>% 
+  # align(align = "center", part = "all") %>% 
+  # fontsize(size = 9, part = "all")%>% 
+  autofit()
+
+# Add footnotes
+t.flex_otus_of_interest <- footnote(t.flex_taxa_of_interest, i = c(1), j = c(5, 6),
+            value = as_paragraph(
+              c("Top hit of a BLAST search against the NCBI database", "Within-Kingdom relative abundance was computed for each OTU")),
+            ref_symbols = c("A", "B"),
+            part = "header", inline = TRUE) %>% 
+  theme_apa() %>% 
+  align(align = "left", part = c("footer")) %>%
+  valign(valign = "bottom", part = "header")
+
+t.flex_taxa_of_interest
+
+
+t.flex_otus_of_interest_ <- t.flex_otus_of_interest
+
+t.flex_otus_of_interest_ <- set_table_properties(t.flex_otus_of_interest_, width = 1, layout = "autofit") %>% 
+  fontsize(size = 3.5, part = "all")
+
+save_as_docx(t.flex_otus_of_interest_, 
+  path = here("Output", "Table_taxa_of_potential_interest.docx"))
+
+
+```
+
+```{r}
+
+```
+

@@ -1,0 +1,906 @@
+---
+title: "Beta diversity analysis fungi"
+author: "Valentin Gfeller"
+date: "`r Sys.Date()`"
+output: 
+  html_document: 
+    toc: true
+    toc_float: true
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+#global knitter option
+knitr::opts_chunk$set(fig.align = "center", echo = FALSE)
+
+# load packages
+library(knitr); packageVersion("knitr")
+library(tidyverse); packageVersion("tidyverse")
+library(phyloseq); packageVersion("phyloseq")
+library(vegan); packageVersion("vegan")
+library(ape); packageVersion("ape")
+library(here); packageVersion("here")
+library(readxl); packageVersion("readxl")
+library(ggpubr); packageVersion("ggpubr")
+library(ggbeeswarm); packageVersion("ggbeeswarm")
+library(cowplot); packageVersion("cowplot")
+library(nlme); packageVersion("nlme")
+library(lme4); packageVersion("lme4")
+library(car); packageVersion("car")
+library(emmeans); packageVersion("emmeans")
+library(FactoMineR); packageVersion("FactoMineR")
+library(factoextra); packageVersion("factoextra")
+library(corrplot); packageVersion("corrplot")
+library(ggtext); packageVersion("ggtext")
+library(cowplot); packageVersion("cowplot")
+
+# functions were written for repeatedly used code (see "/Scripts/Functions.R")
+# source functions
+source(here("Scripts", "Functions.R"))
+
+
+# set global option for ggplot2
+theme_set(theme_bw(base_size = 12))
+```
+
+# Import data
+```{r include=FALSE}
+load(here("Data", "Interim", "phy.fun_clr.RData"))
+load(here("Data", "Interim", "phy.fun_clr_red.RData"))
+load(here("Data", "Interim", "phy.fun_rel.RData"))
+load(here("Data", "Interim", "phy.fun.rel_red.RData"))
+```
+
+
+# Statistics and visualization
+## Seed source plus genotype efffects
+```{r}
+dist_rel <- vegdist(t(otu_table(phy.fun_rel)))
+ord <- ordinate(phy.fun_rel, method = "PCoA", distance = "bray")
+p.phy <- plot_ordination(phy.fun_rel, ord) +
+  ggtitle("PCoA (Bray-Curtis)")
+
+p.phy
+
+# Plot directly in ggplot
+# Add mean and SE for each genotype
+## Perform ordination
+ord <- ordinate(phy.fun_rel, method = "PCoA", distance = "bray")
+
+## Extract data frame
+t.pcoa1 <- plot_ordination(phy.fun_rel, ord, justDF = TRUE, axes = c(1:5)) %>% 
+  as.data.frame() %>% 
+  mutate(breeding_material = factor(breeding_material,
+                                    levels = c("gb", "bm", "cv")))
+
+## Calculate mean and SE for each genotype 
+## And select the genotypes with more than 2 replicates 
+tab.summarise <- t.pcoa1 %>% 
+  select(genotype, starts_with("Axis")) %>% 
+  group_by(genotype) %>% 
+  summarise(mean_axis1 = mean(Axis.1),
+            mean_axis2 = mean(Axis.2),
+            sd_axis1 = sd(Axis.1),
+            sd_axis2 = sd(Axis.2),
+            length_axis1 = sum(!is.na(Axis.1)),
+            length_axis2 = sum(!is.na(Axis.2)),
+            se_axis1 = sd_axis1 / sqrt(length_axis1),
+            se_axis2 = sd_axis2 / sqrt(length_axis2),
+            .groups = "drop") %>% 
+  filter(length_axis1 > 2) 
+
+## Axis labels
+eig_perc <- round(ord$values$Relative_eig[1:5] * 100, 1)
+lab_eig_perc <- paste0("PCo axis ", c(1:5)," [", eig_perc, "%]")
+
+p.mat <- tab.summarise %>%
+  ggplot(aes(mean_axis1 , mean_axis2)) +
+  geom_point(data = t.pcoa1, aes(Axis.1, Axis.2, color = breeding_material), 
+             size = 3, alpha = 0.75) +
+  scale_color_manual(name = "Seed source",
+                     values = c(gb = "#FFCC22", 
+                                bm = "#56B4E9", 
+                                cv = "#009E73"),
+                     labels = c(gb = "Gene bank",
+                                bm ="Breeding material",
+                                cv = "Cultivar")) +
+  xlab(lab_eig_perc[1]) + 
+  ylab(lab_eig_perc[2]) +
+  theme(legend.position = "top")
+
+p.mat
+
+
+## highlight control genotype
+tab.summarise_ctr1 <- tab.summarise %>% 
+  filter(genotype %in% c("C1"))
+tab.summarise_ctr2 <- tab.summarise %>% 
+  filter(genotype %in% c("C2"))
+
+t.pcoa1_ctr1 <- t.pcoa1 %>% 
+  filter(genotype %in% c("C1"))
+t.pcoa1_ctr2 <- t.pcoa1 %>% 
+  filter(genotype %in% c("C2"))
+
+p.1_mat <-  p.mat +
+  geom_errorbar(data = tab.summarise_ctr1, aes(xmin = mean_axis1 + se_axis1, xmax = mean_axis1 - se_axis1),
+                color = "white", width = 0.055, linewidth = 1.5, alpha = 0.6) +
+  geom_errorbar(data = tab.summarise_ctr1, aes(ymin = mean_axis2 + se_axis2, ymax = mean_axis2 - se_axis2),
+                color = "white", width = 0.033, linewidth = 1.5, alpha = 0.6) + 
+  geom_errorbar(data = tab.summarise_ctr1, aes(xmin = mean_axis1 + se_axis1, xmax = mean_axis1 - se_axis1),
+                color = "#5ec962", width = 0.05, linewidth = 1) +
+  geom_errorbar(data = tab.summarise_ctr1, aes(ymin = mean_axis2 + se_axis2, ymax = mean_axis2 - se_axis2),
+                color = "#5ec962", width = 0.03, linewidth = 1) +
+  geom_errorbar(data = tab.summarise_ctr2,aes(xmin = mean_axis1 + se_axis1, xmax = mean_axis1 - se_axis1),
+                color = "white", width = 0.055, linewidth = 1.5, alpha = 0.8) +
+  geom_errorbar(data = tab.summarise_ctr2, aes(ymin = mean_axis2 + se_axis2, ymax = mean_axis2 - se_axis2),
+                color = "white", width = 0.033, linewidth = 1.5, alpha = 0.8) +
+  geom_errorbar(data = tab.summarise_ctr2,aes(xmin = mean_axis1 + se_axis1, xmax = mean_axis1 - se_axis1),
+                color = "#440154", width = 0.05, linewidth = 1) + 
+  geom_errorbar(data = tab.summarise_ctr2, aes(ymin = mean_axis2 + se_axis2, ymax = mean_axis2 - se_axis2),
+                color = "#440154", width = 0.03, linewidth = 1)
+p.1_mat
+
+
+# Add genotype label to C1 and C2 using repel
+p.1_mat <- p.1_mat + 
+  ggrepel::geom_label_repel(data = subset(tab.summarise, genotype %in% c("C1")),
+            aes(label = "EFB.33"), color = "#5ec962", box.padding = 1.5, seed = 5070) + 
+  ggrepel::geom_label_repel(data = subset(tab.summarise, genotype %in% c("C2")),
+            aes(label = "Respect"), color = "#440154", box.padding = 1.5, seed = 5070)
+
+p.1_mat
+
+# Genotypes
+d.samp <- data.frame(sample_data(phy.fun_rel))
+dist <- vegdist(t(otu_table(phy.fun_rel, taxa_are_rows = FALSE)))
+
+dist_permanova <- adonis2(dist_rel ~ genotype,
+                      data =  d.samp, parallel = 30)
+dist_permanova
+
+dist_permanova2 <- adonis2(dist_rel ~ breeding_material,
+                      data =  d.samp, parallel = 30)
+dist_permanova2
+
+# Tidy PERMANOVA output
+t.permanova <- dist_permanova %>% data.frame() %>% 
+  rownames_to_column(var = "Variable") %>% 
+  mutate(p_new = if_else(Pr..F. <= 0.001, paste0("*P* < 0.001 "), 
+                             paste0("*P* = ", signif(Pr..F., 2))),
+         "R^2" = paste0(signif(R2 * 100, 2), "%"),
+             across(where(is.numeric), ~ as.character(signif(., 2))),
+             across(everything(), ~ replace_na(., "")),
+         Variable = str_replace_all(Variable, "genotype", "Genotype"))
+  
+
+
+t.permanova2 <- dist_permanova2 %>% data.frame() %>% 
+  rownames_to_column(var = "Variable") %>% 
+  mutate(p_new = if_else(Pr..F. <= 0.001, paste0("*P* < 0.001 "), 
+                             paste0("*P* = ", signif(Pr..F., 2))),
+         "R^2" = paste0(signif(R2 * 100, 2), "%"),
+             across(where(is.numeric), ~ as.character(signif(., 2))),
+             across(everything(), ~ replace_na(., "")),
+         Variable = str_replace_all(Variable, "breeding_material", "Seed source"))
+
+# Prepare label
+lab_permanova_genotype_fun <- paste0("**PERMANOVA** <Br>",
+                                 t.permanova2$Variable[1],
+                                 ": R<sup>*2*</sup> = ", t.permanova2$`R^2`[1],
+                                 ", ", t.permanova2$p_new[1], "<Br>", 
+                                 t.permanova$Variable[1],
+                                 ": R<sup>*2*</sup> = ", t.permanova$`R^2`[1],
+                                 ", ", t.permanova$p_new[1])
+
+# Print plot with PERMANOVA label
+p.1_mat <- p.1_mat +
+   geom_richtext(aes(x = -Inf, y = Inf, label = lab_permanova_genotype_fun),
+                stat = "unique",
+                fill = "white", label.color = "white", 
+                label.padding = grid::unit(c(0.5, 0.5, 0.5, 0.75), "lines"),
+                hjust = 0, vjust = 1, size = 3,
+                label.r = unit(0, "lines"))
+
+
+p.1_mat
+
+# p <- p.1_mat + ggtitle("Fungi")# Old
+
+# New
+p <- p.1_mat +
+  ggtitle("Fungi") +
+  guides(color = guide_legend(direction = "horizontal")) +
+  theme(plot.title = element_text(size = 16),
+        axis.title = element_text(size = 14),
+        legend.position = c(1, 1.05), 
+        legend.justification = "right",
+        legend.background = element_blank()) 
+
+
+# To save the data for the PERMANOVA label
+p <- plot_grid(p)# old: plot_grid(p + theme(legend.position="none"))
+
+saveRDS(p, here("Data", "Interim", "Figures", "PCoA_genotype_material_fungi_stat.rds"))
+
+
+# Save legend
+legend <- cowplot::get_plot_component(p.1_mat, 'guide-box-top', return_all = TRUE)
+saveRDS(legend, here("Data", "Interim", "Figures", "PCoA_genotype_material_fungi_legend.rds"))
+
+
+```
+
+### Homogeneity of multivariate dispersion
+Adapted from https://gist.github.com/padpadpadpad
+```{r}
+dist_rel <- vegdist(t(otu_table(phy.fun_rel)))
+groups <- d.samp$breeding_material
+mod <- betadisper(dist_rel, groups)
+anova(mod)
+permutest(mod) 
+
+# Extract eigenvalues
+eig <- ((mod$eig/(mod$eig %>% sum()))*100) %>% .[1:5]
+
+# Extract distances
+tab_dist <- tibble(sample_id = names(mod$distances),
+                       group = mod$group,
+                       distance = mod$distances) 
+
+# Extract eigenvectors
+tab_vect <- data.frame(unlist(mod$vectors)) %>% select(1:5) %>%
+  rownames_to_column("sample_id") %>% tibble()
+colnames(tab_vect) <- colnames(tab_vect) %>% str_replace("PCoA", "vector_PCoA")
+
+identical(tab_dist$sample_id, tab_vect$sample_id)
+
+tab_betadisp <- left_join(tab_dist, tab_vect)
+
+# Extract centroids
+tab_cent <- data.frame(unlist(mod$centroids)) %>% select(1:5) %>%
+  rownames_to_column("group") %>% tibble()
+colnames(tab_cent) <- colnames(tab_cent) %>% str_replace("PCoA", "centroid_PCoA")
+
+tab_betadisp <- left_join(tab_betadisp, tab_cent) %>% 
+  mutate(group = factor(group, 
+                        levels = c("gb", "bm", "cv"))) 
+
+# Check if same
+plot(t.pcoa1$Axis.1, tab_betadisp$vector_PCoA1)
+plot(t.pcoa1$Axis.2, tab_betadisp$vector_PCoA2)
+
+tab_betadisp %>% 
+  group_by(group) %>% 
+  summarise(centroid1 = mean(centroid_PCoA1),
+            centroid2 = mean(centroid_PCoA2))
+
+# Add hull
+# get a convex hull for each seed source
+df <- tab_betadisp
+C <- unique(df$group)
+
+tab_hull <- df[NULL, ]
+for (i in 1:length(C))
+{hull_ <- df[df$group == C[i], ][chull(df[df$group ==
+C[i], c("vector_PCoA1", "vector_PCoA2")]), ]
+  tab_hull <- rbind(tab_hull, hull_)
+  }
+
+## Axis labels
+lab_eig_perc <- paste0("PCo axis ", c(1:5)," [", round(eig, 1), "%]")
+
+p.mat <- tab_betadisp %>%
+  ggplot(aes(vector_PCoA1 , vector_PCoA2)) +
+  geom_point(aes(centroid_PCoA1 , centroid_PCoA2 , fill = group), tab_cent, size = 4,
+             shape = 21, color = "black", alpha = 0.7, stroke = 2, show.legend = FALSE) +
+  geom_segment(aes(x = vector_PCoA1 , y = vector_PCoA2, xend = centroid_PCoA1, 
+                   yend = centroid_PCoA2,group = row.names(tab_betadisp), col = group), alpha = 0.35) +
+  geom_polygon(data = tab_hull, aes(color = group), alpha = 0) +
+  geom_point(aes(color = group), size = 3, alpha = 0.35) +
+  scale_fill_manual(values = c(gb = "#FFCC22", 
+                                bm = "#56B4E9", 
+                                cv = "#009E73"),
+                     labels = c(gb = "Gene bank",
+                                bm ="Breeding material",
+                                cv = "Cultivar")) +
+  scale_color_manual(name = "Seed source",
+                     values = c(gb = "#FFCC22", 
+                                bm = "#56B4E9", 
+                                cv = "#009E73"),
+                     labels = c(gb = "Gene bank",
+                                bm ="Breeding material",
+                                cv = "Cultivar")) +
+  xlab(lab_eig_perc[1]) + 
+  ylab(lab_eig_perc[2]) +
+  theme(legend.position = "top") +
+  ggtitle("Fungi") +
+  guides(color = guide_legend(direction = "horizontal")) +
+  theme(legend.position = c(1, 1.05), 
+        legend.justification = "right",
+        legend.background = element_blank()) 
+
+p.mat
+
+# Add betadisper output
+dist_rel <- vegdist(t(otu_table(phy.fun_rel)))
+#material
+groups <- d.samp$breeding_material
+mod <- betadisper(dist_rel, groups)
+anova(mod)
+permutest(mod, parallel = 30) 
+TukeyHSD(mod)
+
+
+# Is it the same as my own model on the distances
+mod.betadisp <- tab_betadisp %>% 
+  lm(distance ~ group, data = .)
+
+mod.betadisp %>% anova()
+mod.betadisp %>% emmeans(., specs = "group") %>% pairs()
+mod.betadisp %>% emmeans(., specs = "group") %>% multcomp::cld(Letters = letters)
+mod.betadisp %>% plot.mod.vg()
+
+# Yes, it is the same. Continue with my own model.
+t.betadisper_anova <- Anova(mod.betadisp) %>% as.data.frame() %>% 
+  rownames_to_column(var = "Variable") %>% 
+  mutate(p_new = if_else(`Pr(>F)` <= 0.001, paste0("*P* < 0.001 "), 
+                             paste0("*P* = ", signif(`Pr(>F)`, 2))),
+         Variable = str_replace_all(Variable, "group", "Seed source"))
+
+
+# Prepare label
+lab_anova_seed_source_fun <- paste0("**ANOVA** (multivariate dispersion) <Br>",
+                                 t.betadisper_anova$Variable[1],
+                                 ": ", t.betadisper_anova$p_new[1])
+
+
+p.mat <- p.mat +
+  geom_richtext(data = tab_betadisp[1, ], aes(x = -Inf, y = Inf, label = lab_anova_seed_source_fun),
+                stat = "unique",
+                fill = "white", label.color = "white", 
+                label.padding = grid::unit(c(0.5, 0.5, 0.5, 0.75), "lines"),
+                hjust = 0, vjust = 1, size = 3,
+                label.r = unit(0, "lines"))
+
+p.mat
+
+
+## Pairwise comparison
+emmeans(mod.betadisp, specs = pairwise ~ group) %>% 
+  .$contrasts %>%
+     rbind(adjust = "fdr") %>% 
+     summary(infer = TRUE)
+
+# Compact letter display
+t.mult_cld <- emmeans(mod.betadisp, specs = "group") %>% multcomp::cld(Letters = letters) %>% as.data.frame()
+
+t.pos_cld_ <- tab_betadisp %>%
+  group_by(group) %>% 
+  summarise(pos_cld = max(distance) + 0.0525)
+
+t.cld <- left_join(t.mult_cld, t.pos_cld_)
+
+p <- tab_betadisp %>% 
+  ggplot(aes(x = group, 
+             y = distance))  +
+  geom_boxplot(outlier.colour = NA) +
+  geom_quasirandom(aes(color = group),
+                   dodge.width = 0.75, width = 0.2, alpha = 0.5,
+                   size = 2.5, show.legend = FALSE, shape = 16) +
+  stat_summary(fun = mean, 
+               geom = "point",
+               size = 2,
+               shape = 18) +
+  stat_summary(fun.data = mean_se, 
+               fun.args = list(mult = 1),
+               geom = "errorbar",
+               width = 0.3)  +
+  labs(x = "Seed source",
+       y = "Distance to centroid") +
+  scale_x_discrete(labels = c(gb = "Gene bank",
+                              bm ="Breeding material",
+                              cv = "Cultivar")) +
+  scale_color_manual(values = c(gb = "#FFCC22", 
+                                bm = "#56B4E9", 
+                                cv = "#009E73")) +
+      geom_text(data = t.cld, aes(x = group, y = pos_cld, 
+                              label = trimws(.group)), size = 5) +
+  ggtitle("Fungi")
+
+p
+
+```
+
+### Combine
+```{r}
+fig <- plot_grid(
+               p.mat,
+               p + theme(legend.position="none"),
+               labels = c("(a)", "(b)"),
+               align = "h",
+               nrow = 1, rel_widths = c(1, 0.6))
+
+fig
+
+p <- fig
+saveRDS(p, here("Data", "Interim", "Figures", "Betadisper_fungi_stats.rds"))
+
+
+# Save legend
+legend <- cowplot::get_plot_component(p.mat, 'guide-box-bottom', return_all = TRUE)
+saveRDS(legend, here("Data", "Interim", "Figures", "Betadisper_fungi_legend.rds"))
+
+rm(list = c("legend", "p", "fig"))
+```
+Dispersion of beta diversity changes for different breeding materials. As expected the gene bank material shows the highest beta dispersion followed by cultivars. The breeding material shows the lowest beta dispersion. 
+
+## Plant phenotypes
+### Plant emergence
+Because emergence showed a high heritability and showed the strongest association with beta diversity, we perform different ordinations for that phenotype.
+```{r}
+# Plot for manuscript directly in ggplot
+## Perform ordination
+sample_data(phy.fun_rel)$Emergence <- sample_data(phy.fun_rel)$emergence  %>%
+  as.factor()
+
+ord <- ordinate(phy.fun_rel, method = "PCoA", distance = "bray")
+
+## Extract data frame
+t.pcoa1 <- plot_ordination(phy.fun_rel, ord, justDF = TRUE, axes = c(1:5)) %>% 
+  as.data.frame()
+
+## Axis labels
+eig_perc <- round(ord$values$Relative_eig[1:5] * 100, 1)
+lab_eig_perc <- paste0("PCo axis ", c(1:5)," [", eig_perc, "%]")
+
+p.emerg <- t.pcoa1 %>% 
+  ggplot(aes(Axis.1, Axis.2, color = Emergence)) +
+  geom_point(size = 3, alpha = 0.75) + 
+  gg_col_emerg() +
+  labs(x = lab_eig_perc[1],
+       y = lab_eig_perc[2]) +
+  theme(legend.position = "top")
+p.emerg
+
+# Add all resistance PERMANOVAs
+d.lab_RRI <- adonis2(dist_rel ~ RRI,
+                           data =  d.samp, parallel = 30) %>% 
+  create_permanova_label(per = ., 
+                       var_name_old = "RRI", 
+                       var_name = "Root rot index (RRI)")
+
+
+d.lab_emergence <- adonis2(dist_rel ~ emergence,
+                                 data =  d.samp, parallel = 30) %>% 
+  create_permanova_label(per = ., 
+                       var_name_old = "emergence", 
+                       var_name = "Emergence")
+
+
+d.lab_shoot_dw_ratio_SNS <- adonis2(dist_rel ~ shoot_dw_ratio_SNS,
+                                          na.action = na.exclude,
+                                          data =  d.samp, parallel = 30) %>% 
+  create_permanova_label(per = ., 
+                       var_name_old = "shoot_dw_ratio_SNS", 
+                       var_name = "SDW<sub>Rel</sub>")
+
+
+d.lab_yield_ratio_SNS <- adonis2(dist_rel ~ yield_ratio_SNS,
+                                       na.action = na.exclude,
+                                       data =  d.samp, parallel = 30) %>% 
+  create_permanova_label(per = ., 
+                       var_name_old = "yield_ratio_SNS", 
+                       var_name = "tSDW<sub>Rel</sub>")
+
+
+d.lab_combined <- paste0(d.lab_emergence,
+                         str_sub(d.lab_RRI, start = 15),
+                         str_sub(d.lab_shoot_dw_ratio_SNS, start = 15),
+                         str_sub(d.lab_yield_ratio_SNS, start = 15))
+
+p.emerg <- p.emerg + geom_add_permanova_(d.lab_combined, size = 2.9)
+p.emerg
+
+# Add emergence x seed source permanova
+set.seed(5070)
+d.per_emergence_ExS <- adonis2(dist_rel ~ emergence * breeding_material,
+                           data =  d.samp, parallel = 30)
+
+d.lab_emergence_1 <- d.per_emergence_ExS %>% data.frame() %>% 
+  create_permanova_label(per = .,
+                         var_name_old = "emergence",
+                         var_name = "Emergence") %>% 
+  str_replace(., "PERMANOVA", "PERMANOVA (Interaction)")
+
+
+d.lab_emergence_2 <- d.per_emergence_ExS  %>% data.frame() %>% .[-1, ] %>% 
+  create_permanova_label(per = .,
+                         var_name_old = "breeding_material",
+                         var_name = "Seed source")
+
+
+d.lab_emergence_3 <- d.per_emergence_ExS %>% data.frame() %>% .[-c(1, 2), ] %>% 
+  create_permanova_label(per = ., 
+                       var_name_old = "emergence:breeding_material", 
+                       var_name = "Emergence x Seed")
+
+d.lab_combined_ExS <- paste0(d.lab_emergence_1,
+                             str_sub(d.lab_emergence_2, start = 15),
+                             str_sub(d.lab_emergence_3, start = 15))
+
+p.emerg <- p.emerg + geom_add_permanova_(d.lab_combined_ExS, size = 2.9,
+                              y = -Inf, vjust = 0)
+
+# Change format
+p.emerg <- p.emerg +
+  ggtitle("Fungi") +
+  guides(color = guide_legend(direction = "horizontal")) +
+  theme(plot.title = element_text(size = 16),
+        axis.title = element_text(size = 14),
+        legend.position = c(1, 1.05), 
+        legend.justification = "right",
+        legend.background = element_blank()) 
+  
+p.emerg
+
+
+# To save the data for the PERMANOVA label
+p <- plot_grid(p.emerg, labels = "(a)")
+
+# Save plot object
+saveRDS(p, here("Data", "Interim", "Figures", "PCoA_emerg_fungi.rds"))
+
+```
+The ordination shows the association between emergence and community composition.
+
+### On genotypes instead of all samples
+```{r}
+# Plot for manuscript (Supplementary figure)
+## Round Emergence to integers
+sample_data(phy.fun.rel_red)$Emergence <- sample_data(phy.fun.rel_red)$emergence  %>%
+  round() %>% as.factor()
+
+ord <- ordinate(phy.fun.rel_red, method = "PCoA", distance = "bray")
+
+## Extract data frame
+t.pcoa1 <- plot_ordination(phy.fun.rel_red, ord, justDF = TRUE, axes = c(1:5)) %>% 
+  as.data.frame()
+
+## Axis labels
+eig_perc <- round(ord$values$Relative_eig[1:5] * 100, 1)
+lab_eig_perc <- paste0("PCo axis ", c(1:5)," [", eig_perc, "%]")
+
+p.emerg <- t.pcoa1 %>% 
+  ggplot(aes(Axis.1, Axis.2, color = Emergence)) +
+  geom_point(size = 3, alpha = 0.75) + 
+  gg_col_emerg() +
+  labs(x = lab_eig_perc[1],
+       y = lab_eig_perc[2]) +
+  theme(legend.position = "top")
+
+p.emerg
+
+
+# Indicate C1 and C2
+p.emerg +
+  geom_label(data = p.emerg$data %>% filter(genotype =="C1"), 
+            mapping = aes(x = Axis.1, y = Axis.2,
+                          label = "EFB.33"),
+             color = "darkgreen", size = 3, fontface = "bold") +
+  geom_label(data = p.emerg$data %>% filter(genotype =="C2"), 
+            mapping = aes(x = Axis.1, y = Axis.2,
+                          label = "Respect"),
+             color = "#330033", size = 3, fontface = "bold")
+
+
+
+## Add PERMANOVA label
+d.samp_red <- data.frame(sample_data(phy.fun.rel_red))
+dist_rel_red <- vegdist(t(otu_table(phy.fun.rel_red)))
+d.permanova <- adonis2(dist_rel_red ~ emergence,
+                       data =  d.samp_red, parallel = 30)
+
+lab.per <- create_permanova_label(per = d.permanova,
+                                  var_name_old = "emergence", var_name = "Emergence")
+
+p.emerg_ <- p.emerg +
+  geom_add_permanova_(label = lab.per, hjust = 0, vjust = 1, x = 0.25, y = Inf)
+p.emerg_
+
+
+# Add all resistance PERMANOVAs
+set.seed(5070)
+d.lab_RRI <- adonis2(dist_rel_red ~ RRI,
+                           data =  d.samp_red, parallel = 30) %>% 
+  create_permanova_label(per = ., 
+                       var_name_old = "RRI", 
+                       var_name = "Root rot index (RRI)")
+
+set.seed(5070)
+d.lab_emergence <- adonis2(dist_rel_red ~ emergence,
+                                 data =  d.samp_red, parallel = 30) %>% 
+  create_permanova_label(per = ., 
+                       var_name_old = "emergence", 
+                       var_name = "Emergence")
+
+d.lab_shoot_dw_ratio_SNS <- adonis2(dist_rel_red ~ shoot_dw_ratio_SNS,
+                                          na.action = na.exclude,
+                                          data =  d.samp_red, parallel = 30) %>% 
+  create_permanova_label(per = ., 
+                       var_name_old = "shoot_dw_ratio_SNS", 
+                       var_name = "SDW<sub>Rel</sub>")
+
+
+d.lab_yield_ratio_SNS <- adonis2(dist_rel_red ~ yield_ratio_SNS,
+                                       na.action = na.exclude,
+                                       data =  d.samp_red, parallel = 30) %>% 
+  create_permanova_label(per = ., 
+                       var_name_old = "yield_ratio_SNS", 
+                       var_name = "tSDW<sub>Rel</sub>")
+
+
+d.lab_combined <- paste0(d.lab_emergence,
+                         str_sub(d.lab_RRI, start = 15),
+                         str_sub(d.lab_shoot_dw_ratio_SNS, start = 15),
+                         str_sub(d.lab_yield_ratio_SNS, start = 15))
+
+p.emerg <- p.emerg + geom_add_permanova_(d.lab_combined, hjust = 0, vjust = 1,
+                                         x = 0.22, y = Inf)
+p.emerg
+
+
+# Add emergence x seed source permanova
+set.seed(5070)
+d.per_emergence_gen <- adonis2(dist_rel_red ~ emergence * breeding_material,
+                           data =  d.samp_red, parallel = 30)
+
+d.lab_emergence_1 <- d.per_emergence_gen %>% 
+  create_permanova_label(per = ., 
+                       var_name_old = "emergence", 
+                       var_name = "Emergence") %>% 
+  str_replace(., "PERMANOVA", "PERMANOVA (Interaction)")
+
+
+d.lab_emergence_2 <- d.per_emergence_gen %>% data.frame() %>% .[-1, ] %>% 
+  create_permanova_label(per = ., 
+                       var_name_old = "breeding_material", 
+                       var_name = "Seed source")
+
+d.lab_emergence_3 <- d.per_emergence_gen %>% data.frame() %>% .[-c(1, 2), ] %>% 
+  create_permanova_label(per = ., 
+                       var_name_old = "emergence:breeding_material", 
+                       var_name = "Emergence x Seed")
+
+d.lab_combined_ExS <- paste0(d.lab_emergence_1,
+                         str_sub(d.lab_emergence_2, start = 15),
+                         str_sub(d.lab_emergence_3, start = 15))
+
+
+
+p.emerg <- p.emerg + geom_add_permanova_(d.lab_combined_ExS, hjust = 0, vjust = 0,
+                                         x = 0.22, y = -Inf)
+p.emerg
+```
+
+
+```{r}
+
+p.emerg <- p.emerg +
+  ggtitle("Fungi") +
+  guides(color = guide_legend(direction = "horizontal")) +
+  theme(plot.title = element_text(size = 16),
+        axis.title = element_text(size = 14),
+        legend.position = c(1, 1.05), 
+        legend.justification = "right",
+        legend.background = element_blank()) 
+  
+p.emerg
+
+
+# To save the data for the PERMANOVA label
+p <-plot_grid(p.emerg, labels = "(c)")
+
+# Save plot object
+saveRDS(p, here("Data", "Interim", "Figures", "PCoA_emerg_genotypes_fungi.rds"))
+
+```
+Similar results as for the whole dataset. Associations are even stronger.
+
+
+# Correlate PCoA Axis 1 
+## Emergence
+```{r}
+# make ordination and extract PCoA axis
+ord_PCoA_Bray <- ordinate(phy.fun_rel, method = "PCoA", distance = "bray")
+plot_ordination(phy.fun_rel, ord_PCoA_Bray, color = "emergence")
+t.pcoa1 <- plot_ordination(phy.fun_rel, ord_PCoA_Bray, justDF = TRUE, axes = c(1:5))
+
+# Per genotype
+# make ordination and extract PCoA axis
+ord_PCoA_Bray_red <- ordinate(phy.fun.rel_red, method = "PCoA", distance = "bray")
+
+plot_ordination(phy.fun.rel_red, ord_PCoA_Bray_red, color = "emergence")
+t.pcoa1_red <- plot_ordination(phy.fun.rel_red, ord_PCoA_Bray_red, justDF = TRUE, axes = c(1:5))
+
+# Plot PCo axis against wheat Emergence
+ggplot(t.pcoa1, aes(x = emergence, y = Axis.1)) +
+  geom_jitter(width = 0.08, alpha = 0.5) +
+  geom_smooth(method = "lm", se = FALSE) +
+  ggpubr::stat_cor(aes(label = paste(after_stat(rr.label), after_stat(p.label), sep = "~`,`~")),
+                   hjust = -0.25) +
+  labs(x = c("emergence" = "Emergence"),
+       y = c("Axis.1" = "PCo axis 1"))
+
+p.mat_ <- t.pcoa1 %>%
+  mutate(breeding_material = factor(breeding_material,
+                                    levels = c("gb", "bm", "cv"))) %>%
+  ggplot(aes(x = emergence, y = Axis.1, color = breeding_material)) +
+  geom_quasirandom(width = 0.15, alpha = 0.5, size = 2.5) +
+  # geom_jitter(width = 0.08, alpha = 0.5) +
+  geom_smooth(method = "lm", se = FALSE) +
+  ggpubr::stat_cor(aes(label = paste(after_stat(rr.label), after_stat(p.label), sep = "~`,`~")),
+                   label.y.npc = "bottom", label.x = 1.05, size = 3, show.legend = FALSE) +
+  scale_color_manual(name = "Seed source",
+                     values = c(gb = "#FFCC22",
+                                bm = "#56B4E9",
+                                cv = "#009E73"),
+                     labels = c(gb = "Gene bank",
+                                bm ="Breeding material",
+                                cv = "Cultivar")) +
+  labs(x = c("emergence" = "Emergence"),
+       y = c("Axis.1" = "PCo axis 1"))+
+  theme(legend.position = "top")
+
+
+# Add ANOVA to PcOA
+m.emerg1 <- t.pcoa1  %>% 
+  lm(Axis.1 ~ emergence * breeding_material, data = .)
+summary(m.emerg1)
+Anova(m.emerg1)
+plot.mod.vg(m.emerg1)
+
+# Just to check of the results are stable
+m.emerg2 <- gls(Axis.1 ~ emergence * breeding_material, 
+                   weights = varIdent(form = ~ 1 | emergence * breeding_material),
+                   data = t.pcoa1)
+plot(m.emerg2)
+qqnorm(m.emerg2, abline = c(0,1))
+Anova(m.emerg2) 
+
+m.emerg2 <- gls(log(Axis.1 + 1) ~ emergence * breeding_material, 
+                   weights = varIdent(form = ~ 1 | emergence * breeding_material),
+                   data = t.pcoa1)
+plot(m.emerg2)
+qqnorm(m.emerg2, abline = c(0,1))
+Anova(m.emerg2)
+
+m.emerg3 <- gls(rank(Axis.1) ~ emergence * breeding_material, 
+                   weights = varIdent(form = ~ 1 | emergence * breeding_material),
+                   data = t.pcoa1)
+plot(m.emerg3)
+qqnorm(m.emerg3, abline = c(0,1))
+Anova(m.emerg3)
+# end
+
+
+t.anova <- Anova(m.emerg1) %>% 
+  rownames_to_column(var = "Variable") %>%
+  tibble() %>% 
+  mutate(Variable = str_replace_all(Variable, "emergence:breeding_material", "E x S:"),
+         Variable = str_replace_all(Variable, "emergence", "Emergence:"),
+         Variable = str_replace_all(Variable, "breeding_material", "Seed source:"),
+         p_new = if_else(`Pr(>F)` < 0.001, paste0("*P* < 0.001 "),
+                         paste0("*P* = ", signif(`Pr(>F)`, 2))),
+         across(where(is.numeric), ~ as.character(signif(., 2))),
+         across(everything(), ~ replace_na(., ""))) 
+    
+t.anova_red <- t.anova %>% 
+  filter(Variable != "Residuals")
+    
+an_title <- "**ANOVA**<Br>"
+
+lab_anova <- paste(an_title, 
+                   t.anova_red$Variable[1], t.anova_red$p_new[1], "<Br>", 
+                   t.anova_red$Variable[2], t.anova_red$p_new[2], "<Br>",
+                   t.anova_red$Variable[3], t.anova_red$p_new[3])
+
+p.mat <- p.mat_  +
+  coord_flip() +
+  geom_richtext(aes(x = 1.15, y = -0.35, label = lab_anova),
+                stat = "unique",
+                fill = "white", label.color = "white", color = "black",
+                label.padding = grid::unit(rep(0.5, 3), "lines"),
+                hjust = 0,
+                vjust = 0, size = 3,
+                label.r = unit(0, "lines")) +
+  ggtitle("Fungi") +
+  guides(color = guide_legend(direction = "horizontal")) +
+  theme(plot.title = element_text(size = 16),
+        axis.title = element_text(size = 14),
+        legend.position = c(1, 1.05), 
+        legend.justification = "right",
+        legend.background = element_blank())
+
+
+p.mat
+
+# Add number of samples per level
+# # Colors according to seed source
+tab.n <- t.pcoa1 %>% 
+  group_by(emergence, Emergence, breeding_material) %>% 
+  summarise(n = sum(!is.na(emergence))) %>% 
+  mutate(N = paste0("n = ", n))
+
+p.mat <- p.mat +
+  geom_text(data = tab.n, 
+            aes( x = emergence, y = 0.45, color = breeding_material, label = N),
+            position = position_dodge(width = 0.5))
+
+
+# To save the data for the PERMANOVA label
+p <- plot_grid(p.mat, labels = "(d)")
+
+# Save plot object
+saveRDS(p, here("Data", "Interim", "Figures", "PCo_axis_vs_emergence_fungi.rds"))
+```
+
+# Save beta diversity meassures
+## PCoA
+```{r}
+ord_PCoA_Bray <- ordinate(phy.fun_rel, method = "PCoA", distance = "bray")
+t.pcoa1 <- plot_ordination(phy.fun_rel, ord_PCoA_Bray, justDF = TRUE, axes = c(1:5)) %>%
+  data.frame() %>%  select("pea_line" = genotype, everything()) %>% tibble()
+colnames(t.pcoa1) <- colnames(t.pcoa1) %>% str_replace("Axis.", "PCoA_")
+
+t.beta_PCoA <- t.pcoa1 %>% 
+  select(pea_line, "Replicate" = rep, contains("PCoA")) %>% 
+  mutate(letter = str_replace_all(pea_line, "[:digit:]", ""),
+         number = parse_number(pea_line),
+         pea_line2 = paste0(letter, sprintf("%03.0f", number))) %>% 
+  select(-c(letter, number)) %>% 
+  select(pea_line, pea_line2, everything()) %>% 
+  arrange(pea_line2)
+
+```
+
+## Combine alpha and beta diversity and save dataframe
+```{r}
+# Save beta diversity
+write.csv(t.beta_PCoA, row.names = FALSE,
+          file = here("Data", "Interim", "beta_div_fun.csv"))
+
+# Combine alpha and beta diversity
+t.beta_full <- read_delim(
+  file = here("Data", "Interim", "beta_div_fun.csv"),
+  delim = ",")
+
+t.alpha_full <- read_delim(
+  file = here("Data", "Interim", "alpha_div_fun.csv"),
+  delim = ",")
+
+t.diversity_full <- left_join(t.alpha_full, t.beta_full)
+
+
+write.csv(t.diversity_full, row.names = FALSE,
+          file = here("Data", "Interim", "diversity_fun.csv"))
+
+# mean per genotype
+t.diversity_full_genotype <- t.diversity_full %>% 
+  select(-Replicate) %>% 
+  group_by(pea_line, pea_line2) %>% 
+  summarise(across(where(is.numeric), ~ mean(.))) %>% 
+  arrange(pea_line2)
+
+
+
+write.csv(t.diversity_full_genotype, row.names = FALSE,
+          file = here("Data", "Interim", "diversity_fun_gen.csv"))
+
+```
+
+
+```{r}
+
+```

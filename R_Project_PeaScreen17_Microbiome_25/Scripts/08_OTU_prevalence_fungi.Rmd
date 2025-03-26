@@ -1,0 +1,78 @@
+---
+title: "Prevalence of fungal OTUs"
+author: "Valentin Gfeller"
+date: "`r Sys.Date()`"
+output: 
+  html_document: 
+    toc: true
+    toc_float: true
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+#global knitter option
+knitr::opts_chunk$set(fig.align = "center", echo = FALSE)
+
+# load packages
+library(knitr); packageVersion("knitr")
+library(tidyverse); packageVersion("tidyverse")
+library(phyloseq); packageVersion("phyloseq")
+library(here); packageVersion("here")
+
+# functions were written for repeatedly used code (see "/Scripts/Functions.R")
+# source functions
+source(here("Scripts", "Functions.R"))
+
+# set global option for ggplot2
+theme_set(theme_bw(base_size = 12))
+```
+
+# Import data
+```{r include=FALSE}
+load(here("Data", "Interim", "phy.fun.all.RData"))
+
+```
+
+# Calculate prevalence of OTUs
+```{r}
+otu <- as(otu_table(phy.fun.all), "matrix")
+if (!taxa_are_rows(phy.fun.all)) {
+            otu <- t(otu)
+            }
+
+prev_abs <- rowSums(otu > 0) %>% sort %>% rev()
+prevalence_rel <- (prev_abs/ncol(otu)) * 100
+
+# save for summary of all OTUs
+saveRDS(prevalence_rel, file = here("Data", "Interim", "Prevalence_OTUs_fun.rds"))
+
+```
+
+# Plot number of OTUs with above a given prevalence
+```{r}
+# plot OTU prevalence
+n_tax <- vector(length = 101L)
+tax_id <- vector(mode = "list", length = 101L)
+
+for (i in 1:101) {
+nr <- nsamples(phy.fun.all) * ((i-1) / 100) 
+nr <-  round(nr)
+test_function <- function(x) {x >= 1}
+
+keep <- genefilter_sample(phy.fun.all, test_function, A = nr)
+core <- prune_taxa(keep, phy.fun.all)
+n_tax[i] <- ntaxa(core)
+tax_id[[i]] <-  taxa_names(core)
+}
+
+p.prev <- ggplot() +
+  geom_point(data = data.frame(), aes(n_tax, c(0:100))) +
+  labs(y = "OTU prevalence (%)",
+       x = "Number of OTUs") +
+  theme_bw(base_size = 14) 
+
+p.prev
+
+
+```

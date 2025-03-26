@@ -1,0 +1,28 @@
+{
+    "id": "51E3253B",
+    "path": "~/data/R_Projects/__FOR_UPLOAD_PeaScreen17_Microbiome_25/Scripts/14_Heritability_microbiome_bacteria.Rmd",
+    "project_path": "Scripts/14_Heritability_microbiome_bacteria.Rmd",
+    "type": "r_markdown",
+    "hash": "696436321",
+    "contents": "",
+    "dirty": false,
+    "created": 1739535654016.0,
+    "source_on_save": false,
+    "relative_order": 13,
+    "properties": {
+        "chunk_output_type": "console",
+        "source_window_id": "",
+        "Source": "Source",
+        "cursorPosition": "235,36",
+        "scrollLine": "0",
+        "docOutlineVisible": "1"
+    },
+    "folds": "",
+    "lastKnownWriteTime": 1739535963,
+    "encoding": "UTF-8",
+    "collab_server": "",
+    "source_window": "",
+    "last_content_update": 1739535963511,
+    "read_only": false,
+    "read_only_alternatives": []
+}

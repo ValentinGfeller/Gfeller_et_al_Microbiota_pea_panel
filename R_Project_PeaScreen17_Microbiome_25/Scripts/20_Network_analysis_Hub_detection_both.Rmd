@@ -1,0 +1,523 @@
+---
+title: "Network analysis and hub detection"
+author: "Valentin Gfeller"
+date: "`r Sys.Date()`"
+output: 
+  html_document: 
+    toc: true
+    toc_float: true
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+#global knitter option
+knitr::opts_chunk$set(fig.align = "center", echo = FALSE)
+
+# load packages
+library(tidyverse); packageVersion("tidyverse")
+library(ggbeeswarm); packageVersion("ggbeeswarm")
+library(emmeans); packageVersion("emmeans")
+library(nlme); packageVersion("nlme")
+library(car); packageVersion("car")
+library(here); packageVersion("here")
+library(ggpubr); packageVersion("ggpubr")
+library(knitr); packageVersion("knitr")
+library(phyloseq); packageVersion("phyloseq")
+library(ape); packageVersion("ape")
+library(vegan); packageVersion("vegan")
+library(geomtextpath); packageVersion("geomtextpath")
+library(SpiecEasi)
+library(igraph)
+
+# functions were written for repeatedly used code (see "/Scripts/Functions.R")
+# source functions
+source(here("Scripts", "Functions.R"))
+
+# set global option for ggplot2
+theme_set(theme_bw(base_size = 12))
+
+```
+
+# Data
+## Import
+```{r include=FALSE}
+load(here("Data", "Interim", "phy.bac_all.RData"))
+phy.bac_all
+
+load(here("Data", "Interim", "phy.fun.all.RData"))
+phy.fun.all
+
+```
+
+## Check data
+```{r}
+# Look at data
+phy.bac_all %>% sample_data() %>% pull(name.ngs_long) %>% .[1:20]
+phy.fun.all %>% sample_data() %>% pull(name.ngs) %>% .[1:20]
+
+# Adjust names to combine the two
+tab.samp_bact <- phy.bac_all %>% sample_data() %>% pull(name.ngs_long) %>% 
+  str_replace("_16S", "") %>% 
+  str_replace("REP", "Rep")
+data.frame(x = sample_data(phy.bac_all)$name.ngs_long, y = tab.samp_bact) %>% slice_sample(n = 20)
+sample_data(phy.bac_all)$name.ngs_long <- tab.samp_bact
+sample_names(phy.bac_all) <- tab.samp_bact
+
+tab.samp_fung <- phy.fun.all %>% sample_data() %>% pull(name.ngs)
+data.frame(x = sample_names(phy.fun.all), y = tab.samp_fung) %>% slice_sample(n = 20)
+sample_names(phy.fun.all) <- tab.samp_fung
+
+# Subset samples to the ones present in bacteria and fungi (intersect)
+to_keep <- intersect(tab.samp_bact, tab.samp_fung)
+
+phy.bac_all_red <- subset_samples(phy.bac_all, name.ngs_long %in% to_keep)
+phy.fun.all_red <-  subset_samples(phy.fun.all,  name.ngs %in% to_keep)
+
+# Check number of lost samples
+phy.bac_all %>% sample_data() %>% dim() %>% .[1]
+phy.fun.all %>% sample_data() %>% dim() %>% .[1]
+phy.bac_all_red %>% sample_data() %>% dim() %>% .[1]
+
+```
+
+## Combine data
+```{r}
+d.bact_red <- phy.bac_all_red %>% otu_table() %>% data.frame()
+d.fun_red  <- phy.fun.all_red  %>% otu_table() %>% data.frame()
+all.equal(d.bact_red %>% colnames() %>% sort(), d.fun_red %>% colnames() %>% sort())
+
+d.otu_comb <- bind_rows(d.bact_red, d.fun_red)
+m.otu_comb <- d.otu_comb %>% as.matrix()
+
+phy.comb <- phyloseq(otu_table(m.otu_comb, taxa_are_rows = TRUE),
+                     sample_data(phy.fun.all_red))
+
+phy.comb_all <- phy.comb
+
+# Counts
+save(phy.comb, file = here("Data", "Interim", "phy.comb_all.RData"))
+```
+
+## Import - CLR
+```{r include=FALSE}
+load(here("Data", "Interim", "phy.bac_clr.RData"))
+phy.bac_clr
+
+load(here("Data", "Interim", "phy.fun_clr.RData"))
+phy.fun_clr
+
+```
+
+## Check data- CLR
+```{r}
+# Look at data
+phy.bac_clr %>% sample_data() %>% pull(name.ngs_long) %>% .[1:20]
+phy.fun_clr %>% sample_data() %>% pull(name.ngs) %>% .[1:20]
+
+# Adjust names to combine the two
+tab.samp_bact <- phy.bac_clr %>% sample_data() %>% pull(name.ngs_long) %>% 
+  str_replace("_16S", "") %>% 
+  str_replace("REP", "Rep")
+data.frame(x = sample_data(phy.bac_clr)$name.ngs_long, y = tab.samp_bact) %>% slice_sample(n = 20)
+sample_data(phy.bac_clr)$name.ngs_long <- tab.samp_bact
+sample_names(phy.bac_clr) <- tab.samp_bact
+
+tab.samp_fung <- phy.fun_clr %>% sample_data() %>% pull(name.ngs)
+data.frame(x = sample_names(phy.fun_clr), y = tab.samp_fung) %>% slice_sample(n = 20)
+sample_names(phy.fun_clr) <- tab.samp_fung
+
+# Subset samples to the ones present in bacteria and fungi (intersect)
+to_keep <- intersect(tab.samp_bact, tab.samp_fung)
+
+phy.bac_clr_red <- subset_samples(phy.bac_clr, name.ngs_long %in% to_keep)
+phy.fun_clr_red <-  subset_samples(phy.fun_clr,  name.ngs %in% to_keep)
+
+# Check number of lost samples
+phy.bac_clr %>% sample_data() %>% dim() %>% .[1]
+phy.fun_clr %>% sample_data() %>% dim() %>% .[1]
+phy.bac_clr_red %>% sample_data() %>% dim() %>% .[1]
+
+
+```
+
+## Combine data - CLR
+```{r}
+d.bact_red <- phy.bac_clr_red %>% otu_table() %>% data.frame()
+d.fun_red  <- phy.fun_clr_red  %>% otu_table() %>% data.frame()
+all.equal(d.bact_red %>% colnames() %>% sort(), d.fun_red %>% colnames() %>% sort())
+
+d.otu_comb_clr <- bind_rows(d.bact_red, d.fun_red)
+m.otu_comb_clr <- d.otu_comb_clr %>% as.matrix()
+
+phy.comb_clr <- phyloseq(otu_table(m.otu_comb_clr, taxa_are_rows = TRUE),
+                     sample_data(phy.fun_clr_red))
+
+phy.comb_clr_all <- phy.comb_clr
+
+# Counts
+save(phy.comb_clr, file = here("Data", "Interim", "phy.comb_clr_all.RData"))
+```
+
+
+# Run SpiecEasi pipeline with both kingdoms
+```{r}
+# Prepare data
+phy.comb_fun <- prune_taxa(phy.comb %>% taxa_names() %>% str_detect("f"), phy.comb)
+phy.comb_bac <- prune_taxa(phy.comb %>% taxa_names() %>% str_detect("b"), phy.comb)
+
+# # Run pipeline
+# SpEa_mat_comb <- spiec.easi(list(phy.comb_bac, phy.comb_fun),
+#                             method = 'mb',
+#                             nlambda = 50,
+#                             lambda.min.ratio = 1e-2,
+#                             pulsar.params = list(rep.num = 50, seed = 5070,
+#                                                  ncores = 40))
+# 
+# saveRDS(SpEa_mat_comb,
+#         here("Data", "Interim", "SpiecEasi_object_combined.rds"))
+
+SpEa_mat_comb <- readRDS(here("Data", "Interim", "SpiecEasi_object_combined.rds"))
+
+# create network
+set.seed(5070)
+igr_net_comb <- adj2igraph(getRefit(SpEa_mat_comb),
+                           vertex.attr = list(name = taxa_names(phy.comb)))
+
+degree(igr_net_comb) %>% sort() %>% .[1:10]
+degree(igr_net_comb) %>% sort(decreasing = TRUE) %>% .[1:10]
+
+# remove if less than 1 degree
+Isolated <-  which(degree(igr_net_comb)==0) %>% names()
+igr_net_comb_red  <-  delete.vertices(igr_net_comb, Isolated)
+
+# calculate layout
+am.coord <- layout.fruchterman.reingold(igr_net_comb_red)
+plot(igr_net_comb_red, layout = am.coord)
+
+# Set color to differentiate the kingdom
+n_bact <- V(igr_net_comb_red)$name %>% str_detect("b") %>% sum()
+N_fung <- V(igr_net_comb_red)$name %>% str_detect("f") %>% sum()
+dtype <- c(rep("darkgrey", n_bact), rep("white", N_fung))
+
+```
+
+# Set color of text to differential abundant OTUs
+```{r}
+# Load da data for bacteria (RRI) and fungi (emergence)
+corr.test <- readRDS(here("Data", "Interim", "DA_bac_corr_RRI_all.rds"))
+# Tidy output
+tab.otu <- data.frame(corr.test) %>% 
+  mutate(OTU = row.names(corr.test)) %>% 
+  select(OTU, everything()) %>% 
+  arrange(spearman.erho) # sort taxa by Spearman's rho
+da.otus_bac <- subset(tab.otu, spearman.eBH < 0.05) ## significant OTUs at the 0.05 level (after correction)
+
+corr.test <- readRDS(here("Data", "Interim", "DA_fun_corr_emergence_all.rds"))
+# Tidy output
+tab.otu <- data.frame(corr.test) %>% 
+  mutate(OTU = row.names(corr.test)) %>% 
+  select(OTU, everything()) %>% 
+  arrange(spearman.erho) # sort taxa by Spearman's rho
+da.otus_fun <- subset(tab.otu, spearman.eBH < 0.05) ## significant OTUs at the 0.05 level (after correction)
+
+rm(list = c("corr.test", "tab.otu"))
+
+tab.otu_da_all_comb <- c(da.otus_fun %>% pull(OTU), da.otus_bac %>% pull(OTU))
+
+dtype.text <- tibble(OTU = V(igr_net_comb_red)$name) %>% 
+  mutate(color = 
+           case_when(
+             OTU %in% tab.otu_da_all_comb ~ "red",
+             TRUE ~ "black")) %>% 
+  pull(color)
+
+
+plot(igr_net_comb_red,
+     vertex.color = dtype,
+     vertex.shape = "circle",
+     vertex.frame.color = "black",
+     vertex.size = 4,
+     vertex.label.cex = 0.3,
+     vertex.label.color = adjustcolor(dtype.text, alpha.f = 0.85),
+     edge.color = adjustcolor("skyblue1", alpha.f = 0.25),
+     layout = layout.fruchterman.reingold)
+
+
+# Set color of Text to heritable OTUs
+tab.otu_bac_herit <- read_csv(file = here("Data", "Interim", "heritability_otu_bac.csv"))
+tab.otu_bac_herit %>% pull(heritable) %>% table()
+
+tab.otu_fun_herit <- read_csv(file = here("Data", "Interim", "heritability_otu_fun.csv"))
+tab.otu_fun_herit %>% pull(heritable) %>% table()
+
+# Select heritable
+tab.otu_bac_herit <- tab.otu_bac_herit %>% 
+  filter(heritable ==TRUE) %>% pull(OTU)
+tab.otu_fun_herit <- tab.otu_fun_herit %>% 
+  filter(heritable ==TRUE) %>% pull(OTU)
+
+tab.otu_herit_all_comb <- c(tab.otu_bac_herit, tab.otu_fun_herit)
+
+dtype.text <- tibble(OTU = V(igr_net_comb_red)$name) %>% 
+  mutate(color = 
+           case_when(
+             TRUE ~ "black"
+           )) %>% 
+  pull(color)
+
+plot(igr_net_comb_red,
+     vertex.color = dtype,
+     vertex.shape = "circle",
+     vertex.frame.color = "black",
+     vertex.size = 4,
+     vertex.label.cex = 0.3,
+     vertex.label.color = adjustcolor(dtype.text, alpha.f = 0.85),
+     edge.color = adjustcolor("skyblue1", alpha.f = 0.25),
+     layout = layout.fruchterman.reingold)
+
+```
+
+# Define color of differential abundant OTUs
+```{r}
+# Load da data for bacteria (RRI) and fungi (emergence)
+corr.test <- readRDS(here("Data", "Interim", "DA_bac_corr_RRI_all.rds"))
+# Tidy output
+tab.otu <- data.frame(corr.test) %>% 
+  mutate(OTU = row.names(corr.test)) %>% 
+  select(OTU, everything()) %>% 
+  arrange(spearman.erho) # sort taxa by Spearman's rho
+da.otus_bac <- subset(tab.otu, spearman.eBH < 0.05) ## significant OTUs at the 0.05 level (after correction)
+
+corr.test <- readRDS(here("Data", "Interim", "DA_fun_corr_emergence_all.rds"))
+# Tidy output
+tab.otu <- data.frame(corr.test) %>% 
+  mutate(OTU = row.names(corr.test)) %>% 
+  select(OTU, everything()) %>% 
+  arrange(spearman.erho) # sort taxa by Spearman's rho
+da.otus_fun <- subset(tab.otu, spearman.eBH < 0.05) ## significant OTUs at the 0.05 level (after correction)
+
+rm(list = c("corr.test", "tab.otu"))
+
+tab.otu_da_all_comb <- c(da.otus_fun %>% pull(OTU), da.otus_bac %>% pull(OTU))
+
+tab.otu_da_neg <- c(da.otus_fun %>% filter(spearman.erho < 0) %>% pull(OTU),
+                    da.otus_bac %>% filter(spearman.erho < 0) %>% pull(OTU))
+tab.otu_da_pos <- c(da.otus_fun %>% filter(spearman.erho > 0) %>% pull(OTU),
+                    da.otus_bac %>% filter(spearman.erho > 0) %>% pull(OTU))
+
+# select only the OTUs that are significantly da for all phenotypes
+da_int_bac <- readRDS(here("Data", "Interim", "DA_bac_OTUs_intersect_all_phenotypes.rds"))
+da_int_fun <- readRDS(here("Data", "Interim", "DA_fun_OTUs_intersect_all_phenotypes.rds"))
+da_int_both <- c(da_int_bac, da_int_fun)
+
+tab.otu_da_all_comb <- tab.otu_da_all_comb[tab.otu_da_all_comb %in% da_int_both]
+tab.otu_da_neg <- tab.otu_da_neg[tab.otu_da_neg %in% da_int_both]
+tab.otu_da_pos <- tab.otu_da_pos[tab.otu_da_pos %in% da_int_both]
+
+# Add colour of vertex
+## Only put labels for da OTUs
+dtype.text <- tibble(OTU = V(igr_net_comb_red)$name) %>% 
+  mutate(color = 
+           case_when(
+             OTU %in% tab.otu_da_neg ~ "black",
+             OTU %in% tab.otu_da_pos ~ "black",
+             TRUE ~ NA_character_)) %>% 
+  pull(color)
+
+## Define colors for bacteria, fungi and positive or negative da fungi or bacteria
+dtype <- tibble(OTU = V(igr_net_comb_red)$name) %>% 
+  mutate(color = 
+           case_when(
+             OTU  %>% str_detect("b")  ~ "darkgrey",
+             OTU %>% str_detect("f")   ~ "white",
+             OTU %in% tab.otu_da_neg | 
+               OTU %>% str_detect("b") ~ "darkred",
+             OTU %in% tab.otu_da_pos |
+               OTU %>% str_detect("b") ~ "darkgreen",
+             OTU %in% tab.otu_da_neg | 
+               OTU %>% str_detect("f") ~ "red",
+             OTU %in% tab.otu_da_pos |
+               OTU %>% str_detect("f") ~ "lightgreen",
+             TRUE ~ NA_character_),
+         color = 
+           case_when(
+             OTU %in% tab.otu_da_neg & 
+               OTU %>% str_detect("b") ~ "darkred",
+             OTU %in% tab.otu_da_pos &
+               OTU %>% str_detect("b") ~ "darkgreen",
+             OTU %in% tab.otu_da_neg & 
+               OTU %>% str_detect("f") ~ "red",
+             OTU %in% tab.otu_da_pos &
+               OTU %>% str_detect("f") ~ "lightgreen",
+             TRUE ~ color)) %>% 
+  pull(color)
+
+plot(igr_net_comb_red,
+     vertex.color = adjustcolor(dtype, alpha.f = 0.75),
+     vertex.shape = "circle",
+     vertex.frame.color = adjustcolor("black", alpha.f = 0.75),
+     vertex.size = 4,
+     vertex.label.cex = 0.3,
+     vertex.label.color = adjustcolor(dtype.text, alpha.f = 0.5),
+     edge.color = adjustcolor("skyblue1", alpha.f = 0.3),
+     layout = layout.fruchterman.reingold)
+
+
+
+# Add information of heritable OTUs (circle colour == blue)
+tab.otu_bac_herit <- read_csv(file = here("Data", "Interim", "heritability_otu_bac.csv"))
+tab.otu_bac_herit %>% pull(heritable) %>% table()
+
+tab.otu_fun_herit <- read_csv(file = here("Data", "Interim", "heritability_otu_fun.csv"))
+tab.otu_fun_herit %>% pull(heritable) %>% table()
+
+
+# Select top 58 heritable
+tab.otu_herit_all_comb <- bind_rows(tab.otu_bac_herit, tab.otu_fun_herit)
+
+tab.otu_herit_all_comb <- tab.otu_herit_all_comb %>% 
+  slice_max(heritability, n = 58) %>% pull(OTU)
+
+dtype.frame <- tibble(OTU = V(igr_net_comb_red)$name) %>% 
+  mutate(color = 
+           case_when(
+             OTU %in% tab.otu_herit_all_comb ~ "darkblue",
+             TRUE ~ "black"
+           )) %>% 
+  pull(color)
+
+width.frame <- tibble(OTU = V(igr_net_comb_red)$name) %>% 
+  mutate(color = 
+           case_when(
+             OTU %in% tab.otu_herit_all_comb ~ 2.5,
+             TRUE ~ 1)) %>% 
+  pull(color)
+
+
+
+plot(igr_net_comb_red,
+     vertex.color = adjustcolor(dtype, alpha.f = 0.75),
+     vertex.shape = "circle",
+     vertex.frame.color = adjustcolor(dtype.frame, alpha.f = 0.6),
+     vertex.frame.width = width.frame,
+     vertex.size = 4,
+     vertex.label.cex = 0.4,
+     vertex.label.color = adjustcolor(dtype.text, alpha.f = 0.75),
+     edge.color = adjustcolor("skyblue1", alpha.f = 0.3),
+     layout = layout.fruchterman.reingold)
+
+```
+
+```{r}
+# save image plot in Script 22
+save.image(file = here("Data", "Interim", "Image_Network.RData"))
+
+```
+
+# Hub taxa detection
+```{r echo=TRUE}
+# Calculate network attributes (betweenness and degree)
+net_bn <- betweenness(igr_net_comb_red)
+d.bn <- tibble(OTU = names(net_bn), betweenness = net_bn)
+
+net_dg <- degree(igr_net_comb_red)
+d.dg <- tibble(OTU = names(net_dg), degree = net_dg)
+
+d.both <- left_join(d.bn, d.dg)
+
+# Top 10%
+top10_bn <- net_bn %>% sort(decreasing = TRUE) %>% 
+  head(n = length(.) * 0.1) %>% names()
+
+top10_dg <- net_dg %>% sort(decreasing = TRUE) %>% 
+  head(n = length(.) * 0.1) %>% names()
+
+# Add to data frame
+d.hub_both <- d.both %>% 
+  mutate(
+    top10_bn = case_when(OTU %in% top10_bn ~ TRUE,
+                         TRUE ~ FALSE),
+    top10_dg = case_when(OTU %in% top10_dg ~ TRUE,
+                         TRUE ~ FALSE),
+    top10_both = case_when(top10_bn == TRUE & top10_dg == TRUE ~ TRUE,
+                           TRUE ~FALSE))
+```
+
+## Save hub taxa
+```{r echo=TRUE}
+# save
+write.csv(d.hub_both, row.names = FALSE,
+          file = here("Data", "Interim", "Hub_taxa_both_kingdoms.csv"))
+
+```
+
+# Check how network attributes correlate
+```{r echo=TRUE}
+# Check how network attributes correlate
+d.hub_both %>% 
+  ggplot(aes(degree, betweenness)) + 
+  geom_point() +
+  geom_smooth(method = "lm") +
+  stat_regline_equation(aes(label =  paste(after_stat(eq.label), after_stat(adj.rr.label), 
+                                           sep = "~~~~")))
+
+# Highlight OTUs in the top 10% of both degree and betweenness
+d.hub_both %>% 
+  ggplot(aes(degree, betweenness)) + 
+  geom_point() +
+  geom_smooth(method = "lm") +
+  stat_regline_equation(aes(label =  paste(after_stat(eq.label), after_stat(adj.rr.label), 
+                                           sep = "~~~~"))) +
+  geom_point(data = d.hub_both %>% filter(top10_both == TRUE), aes(degree, betweenness), size = 4, 
+             shape = 21, color="red", stroke = 2)
+
+(d.hub_both %>% filter(top10_both == TRUE) %>% nrow())/(d.hub_both %>% nrow())
+
+
+# Highlight OTUs in the top 10 % of either degree or betweenness
+d.hub_both %>% 
+  ggplot(aes(degree, betweenness)) + 
+  geom_point() +
+  geom_smooth(method = "lm") +
+  stat_regline_equation(aes(label =  paste(after_stat(eq.label), after_stat(adj.rr.label), 
+                                           sep = "~~~~"))) +
+  geom_point(data = d.hub_both %>% filter(top10_dg == TRUE | top10_bn == TRUE), aes(degree, betweenness), size = 4, 
+             shape = 21, color="red", stroke = 2) 
+
+(d.hub_both %>% filter(top10_dg == TRUE | top10_bn == TRUE) %>% nrow())/(d.hub_both %>% nrow())
+
+
+# Check ranks
+d.hub_both %>% 
+  ggplot(aes(rank(degree), rank(betweenness))) + 
+  geom_point() +
+  geom_smooth(method = "lm") +
+  stat_regline_equation(aes(label =  paste(after_stat(eq.label), after_stat(adj.rr.label), 
+                                           sep = "~~~~"))) +
+  geom_point(data = d.hub_both %>% 
+               mutate(degree = rank(degree),
+                      betweenness = rank(betweenness)) %>% 
+               filter(top10_dg == TRUE | top10_bn == TRUE), aes(degree, betweenness), size = 4, 
+             shape = 21, color="red", stroke = 2)
+
+
+# Number of OTUs that are either or 
+d.hub_both %>% filter(top10_dg == TRUE | top10_bn == TRUE) %>% nrow()
+d.hub_both %>% filter(top10_dg == TRUE) %>% nrow()
+d.hub_both %>% filter(top10_bn == TRUE) %>% nrow()
+
+
+intersect(d.hub_both %>% filter(top10_dg == TRUE),
+          d.hub_both %>% filter(top10_bn == TRUE)) %>% nrow()
+
+# both
+d.hub_both %>% filter(top10_both == TRUE) %>% nrow()
+
+```
+
+
+```{r}
+ 
+```
+

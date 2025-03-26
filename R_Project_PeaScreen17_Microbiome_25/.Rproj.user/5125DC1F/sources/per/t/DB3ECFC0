@@ -1,0 +1,28 @@
+{
+    "id": "DB3ECFC0",
+    "path": "~/data/R_Projects/__FOR_UPLOAD_PeaScreen17_Microbiome_25/Scripts/17_OTU_prevalence_bacteria.Rmd",
+    "project_path": "Scripts/17_OTU_prevalence_bacteria.Rmd",
+    "type": "r_markdown",
+    "hash": "3447843331",
+    "contents": "",
+    "dirty": false,
+    "created": 1739541683987.0,
+    "source_on_save": false,
+    "relative_order": 16,
+    "properties": {
+        "chunk_output_type": "console",
+        "source_window_id": "",
+        "Source": "Source",
+        "cursorPosition": "78,0",
+        "scrollLine": "0",
+        "docOutlineVisible": "1"
+    },
+    "folds": "",
+    "lastKnownWriteTime": 1739541724,
+    "encoding": "UTF-8",
+    "collab_server": "",
+    "source_window": "",
+    "last_content_update": 1739541724787,
+    "read_only": false,
+    "read_only_alternatives": []
+}
