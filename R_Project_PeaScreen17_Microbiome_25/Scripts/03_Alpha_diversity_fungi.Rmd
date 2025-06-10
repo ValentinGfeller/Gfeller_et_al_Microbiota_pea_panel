@@ -641,6 +641,75 @@ saveRDS(p, here("Data", "Interim", "Figures", "Richness_resistance_fungi.rds"))
 rm(list = c("p", "fig"))
 
 ```
+# Test if the two datapoints with RRI 2 drive the correlations
+## RRI
+
+```{r}
+d.alpha <- d.alpha %>% 
+  filter(RRI > 2)
+```
+
+
+```{r}
+# RRI
+## Richness
+d.alpha <- d.alpha %>% 
+  mutate(RRI_f = factor(RRI))
+
+fill_rri <- d.alpha %>% 
+  mutate(RRI_col = case_when(
+    RRI < 3.5   ~ "#5ec962",
+    RRI < 4.5   ~ "#21918c",
+    RRI < 5.5   ~ "#3b528b",
+    TRUE        ~ "#440154"))  %>% pull(RRI_col, RRI_f)
+
+p.alpha_rri_rich <- d.alpha %>%  
+  ggplot(aes(x = RRI, 
+             y = richness)) +
+  geom_quasirandom(aes(fill = RRI_f),
+                   width = 0.15, alpha = 0.5,
+                   size = 2, show.legend = FALSE, shape = 21) +
+  labs(x = "RRI",
+       y = "OTU Richness") +
+  geom_smooth(method = "lm", formula = 'y ~ x', se = FALSE, color = "black",
+              fullrange = TRUE) +
+  ggpubr::stat_cor(aes(label = 
+                         paste(after_stat(rr.label), after_stat(..p.label..),
+                               sep = "~`,`~")), method = "spearman",
+                   label.x.npc = "right", hjust = 1.1, vjust = -0.5) +
+  scale_y_continuous(expand = expansion(mult = c(0.1, 0.15))) +
+  scale_fill_manual(values = fill_rri) +
+  ggpubr::stat_regline_equation(label.x.npc = "left", vjust = -0.65)
+
+  
+
+p.alpha_rri_rich
+
+
+## Shannon
+p.alpha_rri_shann <- d.alpha %>%  
+  ggplot(aes(x = RRI, 
+             y = shannon)) +
+  geom_quasirandom(aes(fill = RRI_f),
+                   width = 0.15, alpha = 0.5,
+                   size = 2, show.legend = FALSE, shape = 21) +
+  labs(x = "RRI",
+       y = "Shannon") +
+  geom_smooth(method = "lm", formula = 'y ~ x', se = FALSE, color = "darkgrey",
+              fullrange = TRUE) +
+  ggpubr::stat_cor(aes(label = 
+                         paste(after_stat(rr.label), after_stat(..p.label..),
+                               sep = "~`,`~")), method = "spearman",
+                   label.x.npc = "right", hjust = 1.1, vjust = -0.5) +
+  scale_y_continuous(expand = expansion(mult = c(0.1, 0.15))) +
+  scale_fill_manual(values = fill_rri) +
+  ggpubr::stat_regline_equation(label.x.npc = "left", vjust = -0.65)
+
+  
+
+p.alpha_rri_shann
+
+```
 
 
 ```{r}
