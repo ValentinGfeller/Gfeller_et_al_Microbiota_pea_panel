@@ -515,6 +515,509 @@ intersect(d.hub_both %>% filter(top10_dg == TRUE),
 d.hub_both %>% filter(top10_both == TRUE) %>% nrow()
 
 ```
+# Network anlalysis with top abundant OTUs
+To check if we get similar hub taxa when the same number of taxa are used for fungal and bacterial OTUs.
+
+## Run SpiecEasi pipeline with both kingdoms
+```{r}
+# Prepare data
+phy.comb_fun <- prune_taxa(phy.comb %>% taxa_names() %>% str_detect("f"), phy.comb)
+phy.comb_bac <- prune_taxa(phy.comb %>% taxa_names() %>% str_detect("b"), phy.comb)
+
+ntaxa(phy.comb_fun)
+ntaxa(phy.comb_bac) # Select top 250 OTUs each
+
+# Filter fungi
+n_sum <- taxa_sums(phy.comb_fun) %>% sort(decreasing = TRUE) %>% .[251]
+phy.comb_fun <- prune_taxa(taxa_sums(phy.comb_fun) > n_sum, phy.comb_fun)
+
+# Filter bacteria
+n_sum <- taxa_sums(phy.comb_bac) %>% sort(decreasing = TRUE) %>% .[251]
+phy.comb_bac <- prune_taxa(taxa_sums(phy.comb_bac) > n_sum, phy.comb_bac)
+
+# Filter combined phyloseq object
+keep <- c(taxa_names(phy.comb_bac), taxa_names(phy.comb_fun))
+phy.comb_red <- prune_taxa(keep, phy.comb)
+phy.comb_red
+
+# # Run pipeline
+# SpEa_mat_comb_top <- spiec.easi(list(phy.comb_bac, phy.comb_fun),
+#                             method = 'mb',
+#                             nlambda = 50,
+#                             lambda.min.ratio = 1e-2,
+#                             pulsar.params = list(rep.num = 50, seed = 5070,
+#                                                  ncores = 40))
+# 
+# saveRDS(SpEa_mat_comb_top,
+#         here("Data", "Interim", "SpiecEasi_object_comb_top.rds"))
+
+SpEa_mat_comb_top <- readRDS(here("Data", "Interim", "SpiecEasi_object_comb_top.rds"))
+
+# create network
+set.seed(5070)
+igr_net_comb_top <- adj2igraph(getRefit(SpEa_mat_comb_top),
+                           vertex.attr = list(name = taxa_names(phy.comb_red)))
+
+
+
+degree(igr_net_comb_top) %>% sort() %>% .[1:10]
+degree(igr_net_comb_top) %>% sort(decreasing = TRUE) %>% .[1:10]
+
+# remove if less than 1 degree
+Isolated <-  which(degree(igr_net_comb_top)==0) %>% names()
+igr_net_comb_top_red  <-  delete.vertices(igr_net_comb_top, Isolated)
+
+# calculate layout
+am.coord <- layout.fruchterman.reingold(igr_net_comb_top_red)
+plot(igr_net_comb_top_red, layout = am.coord)
+```
+
+## Hub taxa detection
+```{r echo=TRUE}
+# Calculate network attributes (betweenness and degree)
+net_bn <- betweenness(igr_net_comb_top_red)
+d.bn <- tibble(OTU = names(net_bn), betweenness = net_bn)
+
+net_dg <- degree(igr_net_comb_top_red)
+d.dg <- tibble(OTU = names(net_dg), degree = net_dg)
+
+d.both <- left_join(d.bn, d.dg)
+
+# Top 10%
+top10_bn <- net_bn %>% sort(decreasing = TRUE) %>% 
+  head(n = length(.) * 0.1) %>% names()
+
+top10_dg <- net_dg %>% sort(decreasing = TRUE) %>% 
+  head(n = length(.) * 0.1) %>% names()
+
+# Add to data frame
+d.hub_both_topAbun <- d.both %>% 
+  mutate(
+    top10_bn = case_when(OTU %in% top10_bn ~ TRUE,
+                         TRUE ~ FALSE),
+    top10_dg = case_when(OTU %in% top10_dg ~ TRUE,
+                         TRUE ~ FALSE),
+    top10_both = case_when(top10_bn == TRUE & top10_dg == TRUE ~ TRUE,
+                           TRUE ~ FALSE))
+
+d.hub_both_topAbun %>% filter(top10_both == TRUE)
+```
+
+
+## Check how network attributes correlate
+```{r echo=TRUE}
+# Check how network attributes correlate
+d.hub_both_topAbun %>% 
+  ggplot(aes(degree, betweenness)) + 
+  geom_point() +
+  geom_smooth(method = "lm") +
+  stat_regline_equation(aes(label =  paste(after_stat(eq.label), after_stat(adj.rr.label), 
+                                           sep = "~~~~")))
+
+# Highlight OTUs in the top 10% of both degree and betweenness
+d.hub_both_topAbun %>% 
+  ggplot(aes(degree, betweenness)) + 
+  geom_point() +
+  geom_smooth(method = "lm") +
+  stat_regline_equation(aes(label =  paste(after_stat(eq.label), after_stat(adj.rr.label), 
+                                           sep = "~~~~"))) +
+  geom_point(data = d.hub_both_topAbun %>% filter(top10_both == TRUE), aes(degree, betweenness), size = 4, 
+             shape = 21, color="red", stroke = 2)
+
+(d.hub_both_topAbun %>% filter(top10_both == TRUE) %>% nrow())/(d.hub_both_topAbun %>% nrow())
+
+
+# Highlight OTUs in the top 10 % of either degree or betweenness
+d.hub_both_topAbun %>% 
+  ggplot(aes(degree, betweenness)) + 
+  geom_point() +
+  geom_smooth(method = "lm") +
+  stat_regline_equation(aes(label =  paste(after_stat(eq.label), after_stat(adj.rr.label), 
+                                           sep = "~~~~"))) +
+  geom_point(data = d.hub_both_topAbun %>% filter(top10_dg == TRUE | top10_bn == TRUE), aes(degree, betweenness), size = 4, 
+             shape = 21, color="red", stroke = 2) 
+
+(d.hub_both_topAbun %>% filter(top10_dg == TRUE | top10_bn == TRUE) %>% nrow())/(d.hub_both_topAbun %>% nrow())
+
+
+# Check ranks
+d.hub_both_topAbun %>% 
+  ggplot(aes(rank(degree), rank(betweenness))) + 
+  geom_point() +
+  geom_smooth(method = "lm") +
+  stat_regline_equation(aes(label =  paste(after_stat(eq.label), after_stat(adj.rr.label), 
+                                           sep = "~~~~"))) +
+  geom_point(data = d.hub_both_topAbun %>% 
+               mutate(degree = rank(degree),
+                      betweenness = rank(betweenness)) %>% 
+               filter(top10_dg == TRUE | top10_bn == TRUE), aes(degree, betweenness), size = 4, 
+             shape = 21, color="red", stroke = 2)
+
+
+# Number of OTUs that are either or 
+d.hub_both_topAbun %>% filter(top10_dg == TRUE | top10_bn == TRUE) %>% nrow()
+d.hub_both_topAbun %>% filter(top10_dg == TRUE) %>% nrow()
+d.hub_both_topAbun %>% filter(top10_bn == TRUE) %>% nrow()
+
+
+intersect(d.hub_both_topAbun %>% filter(top10_dg == TRUE),
+          d.hub_both_topAbun %>% filter(top10_bn == TRUE)) %>% nrow()
+
+# both
+d.hub_both_topAbun %>% filter(top10_both == TRUE) %>% nrow()
+
+```
+
+## Compare different methods
+```{r}
+## Degree or betweenness in top 10%
+top_hub_comb <- d.hub_both %>% filter(top10_bn == TRUE | top10_dg == TRUE ) %>% pull(OTU)
+top_hub_topAbun <- d.hub_both_topAbun %>% filter(top10_bn == TRUE | top10_dg == TRUE ) %>% pull(OTU)
+
+# Number of OTUs
+top_hub_comb %>% length()
+top_hub_topAbun %>% length()
+
+# Visualize intersections
+## all three
+l.otu_top_hub <- list(top_hub_comb = top_hub_comb,
+                      top_hub_topAbun = top_hub_topAbun)
+
+UpSetR::upset(UpSetR::fromList(l.otu_top_hub), order.by = "freq")
+
+## Combined kingdom analysis vs. analysis with only top abundant OTUs
+l.otu_top_hub <- list(top_hub_comb = top_hub_comb,
+                      top_hub_topAbun = top_hub_topAbun)
+
+UpSetR::upset(UpSetR::fromList(l.otu_top_hub), order.by = "freq")
+
+## Check intersect
+top_hub_intersect <- intersect(top_hub_comb, top_hub_topAbun)
+
+# Check intersection with OTUs of most interest
+otu_interest <- c("fOTU860", "fOTU1450", "fOTU1557", "bOTU15", "bOTU5", 
+                  "fOTU1598", "bOTU1", "fOTU22", "bOTU4", "fOTU1517", "fOTU1508")
+
+top_hub_intersect <- intersect(top_hub_intersect, otu_interest)
+top_hub_intersect
+sym_diff(top_hub_intersect, otu_interest)
+
+```
+
+
+
+# Individual kingdoms for comparison
+To check if we get similar hub taxa with this method
+
+## Fungi
+### Run SpiecEasi pipeline fungi
+```{r}
+# Prepare data
+phy.comb_fun <- prune_taxa(phy.comb %>% taxa_names() %>% str_detect("f"), phy.comb)
+
+# # Run pipeline
+# SpEa_mat_fun <- spiec.easi(phy.comb_fun,
+#                            method = 'mb',
+#                            nlambda = 50,
+#                            lambda.min.ratio = 1e-2,
+#                            pulsar.params = list(rep.num = 50, seed = 5070,
+#                                                 ncores = 40))
+# 
+# saveRDS(SpEa_mat_fun,
+#         here("Data", "Interim", "SpiecEasi_object_fun.rds"))
+
+SpEa_mat_fun <- readRDS(here("Data", "Interim", "SpiecEasi_object_fun.rds"))
+
+# create network
+set.seed(5070)
+igr_net_fun <- adj2igraph(getRefit(SpEa_mat_fun),
+                           vertex.attr = list(name = taxa_names(phy.comb_fun)))
+
+degree(igr_net_fun) %>% sort() %>% .[1:10]
+degree(igr_net_fun) %>% sort(decreasing = TRUE) %>% .[1:10]
+
+# remove if less than 1 degree
+Isolated <-  which(degree(igr_net_fun)==0) %>% names()
+igr_net_fun_red  <-  delete.vertices(igr_net_fun, Isolated)
+
+# calculate layout
+am.coord <- layout.fruchterman.reingold(igr_net_fun_red)
+plot(igr_net_fun_red, layout = am.coord)
+
+```
+
+### Hub taxa detection fungi
+```{r echo=TRUE}
+# Calculate network attributes (betweenness and degree)
+net_bn <- betweenness(igr_net_fun_red)
+d.bn <- tibble(OTU = names(net_bn), betweenness = net_bn)
+
+net_dg <- degree(igr_net_fun_red)
+d.dg <- tibble(OTU = names(net_dg), degree = net_dg)
+
+d.both_fun <- left_join(d.bn, d.dg)
+
+# Top 10%
+top10_bn <- net_bn %>% sort(decreasing = TRUE) %>% 
+  head(n = length(.) * 0.1) %>% names()
+
+top10_dg <- net_dg %>% sort(decreasing = TRUE) %>% 
+  head(n = length(.) * 0.1) %>% names()
+
+# Add to data frame
+d.hub_both_fun <- d.both_fun %>% 
+  mutate(
+    top10_bn = case_when(OTU %in% top10_bn ~ TRUE,
+                         TRUE ~ FALSE),
+    top10_dg = case_when(OTU %in% top10_dg ~ TRUE,
+                         TRUE ~ FALSE),
+    top10_both_fun = case_when(top10_bn == TRUE & top10_dg == TRUE ~ TRUE,
+                           TRUE ~ FALSE))
+
+# save hub taxa
+write.csv(d.hub_both_fun, row.names = FALSE,
+          file = here("Data", "Interim", "Hub_taxa_fun.csv"))
+
+```
+
+### Check how network attributes correlate fungi
+```{r echo=TRUE}
+# Check how network attributes correlate
+d.hub_both_fun %>% 
+  ggplot(aes(degree, betweenness)) + 
+  geom_point() +
+  geom_smooth(method = "lm") +
+  stat_regline_equation(aes(label =  paste(after_stat(eq.label), after_stat(adj.rr.label), 
+                                           sep = "~~~~")))
+
+# Highlight OTUs in the top 10% of both_fun degree and betweenness
+d.hub_both_fun %>% 
+  ggplot(aes(degree, betweenness)) + 
+  geom_point() +
+  geom_smooth(method = "lm") +
+  stat_regline_equation(aes(label =  paste(after_stat(eq.label), after_stat(adj.rr.label), 
+                                           sep = "~~~~"))) +
+  geom_point(data = d.hub_both_fun %>% filter(top10_both_fun == TRUE), aes(degree, betweenness), size = 4, 
+             shape = 21, color="red", stroke = 2)
+
+(d.hub_both_fun %>% filter(top10_both_fun == TRUE) %>% nrow())/(d.hub_both_fun %>% nrow())
+
+
+# Highlight OTUs in the top 10 % of either degree or betweenness
+d.hub_both_fun %>% 
+  ggplot(aes(degree, betweenness)) + 
+  geom_point() +
+  geom_smooth(method = "lm") +
+  stat_regline_equation(aes(label =  paste(after_stat(eq.label), after_stat(adj.rr.label), 
+                                           sep = "~~~~"))) +
+  geom_point(data = d.hub_both_fun %>% filter(top10_dg == TRUE | top10_bn == TRUE), aes(degree, betweenness), size = 4, 
+             shape = 21, color="red", stroke = 2) 
+
+(d.hub_both_fun %>% filter(top10_dg == TRUE | top10_bn == TRUE) %>% nrow())/(d.hub_both_fun %>% nrow())
+
+
+# Check ranks
+d.hub_both_fun %>% 
+  ggplot(aes(rank(degree), rank(betweenness))) + 
+  geom_point() +
+  geom_smooth(method = "lm") +
+  stat_regline_equation(aes(label =  paste(after_stat(eq.label), after_stat(adj.rr.label), 
+                                           sep = "~~~~"))) +
+  geom_point(data = d.hub_both_fun %>% 
+               mutate(degree = rank(degree),
+                      betweenness = rank(betweenness)) %>% 
+               filter(top10_dg == TRUE | top10_bn == TRUE), aes(degree, betweenness), size = 4, 
+             shape = 21, color="red", stroke = 2)
+
+
+# Number of OTUs that are either or 
+d.hub_both_fun %>% filter(top10_dg == TRUE | top10_bn == TRUE) %>% nrow()
+d.hub_both_fun %>% filter(top10_dg == TRUE) %>% nrow()
+d.hub_both_fun %>% filter(top10_bn == TRUE) %>% nrow()
+
+
+intersect(d.hub_both_fun %>% filter(top10_dg == TRUE),
+          d.hub_both_fun %>% filter(top10_bn == TRUE)) %>% nrow()
+
+
+d.hub_both_fun %>% filter(top10_both_fun == TRUE) %>% nrow()
+d.hub_both_fun %>% filter(top10_bn == TRUE | top10_dg == TRUE) %>% nrow()
+
+```
+
+## Bacteria
+### Run SpiecEasi pipeline bacteria
+```{r}
+# Prepare data
+phy.comb_bac <- prune_taxa(phy.comb %>% taxa_names() %>% str_detect("b"), phy.comb)
+
+# # Run pipeline
+# SpEa_mat_bac <- spiec.easi(phy.comb_bac,
+#                            method = 'mb',
+#                            nlambda = 50,
+#                            lambda.min.ratio = 1e-2,
+#                            pulsar.params = list(rep.num = 50, seed = 5070,
+#                                                 ncores = 40))
+# 
+# saveRDS(SpEa_mat_bac,
+#         here("Data", "Interim", "SpiecEasi_object_bac.rds"))
+
+SpEa_mat_bac <- readRDS(here("Data", "Interim", "SpiecEasi_object_bac.rds"))
+
+# create network
+set.seed(5070)
+igr_net_bac <- adj2igraph(getRefit(SpEa_mat_bac),
+                           vertex.attr = list(name = taxa_names(phy.comb_bac)))
+
+degree(igr_net_bac) %>% sort() %>% .[1:10]
+degree(igr_net_bac) %>% sort(decreasing = TRUE) %>% .[1:10]
+
+# remove if less than 1 degree
+Isolated <-  which(degree(igr_net_bac)==0) %>% names()
+igr_net_bac_red  <-  delete.vertices(igr_net_bac, Isolated)
+
+# calculate layout
+am.coord <- layout.fruchterman.reingold(igr_net_bac_red)
+plot(igr_net_bac_red, layout = am.coord)
+
+```
+
+### Hub taxa detection bacteria
+```{r echo=TRUE}
+# Calculate network attributes (betweenness and degree)
+net_bn <- betweenness(igr_net_bac_red)
+d.bn <- tibble(OTU = names(net_bn), betweenness = net_bn)
+
+net_dg <- degree(igr_net_bac_red)
+d.dg <- tibble(OTU = names(net_dg), degree = net_dg)
+
+d.both_bac <- left_join(d.bn, d.dg)
+
+# Top 10%
+top10_bn <- net_bn %>% sort(decreasing = TRUE) %>% 
+  head(n = length(.) * 0.1) %>% names()
+
+top10_dg <- net_dg %>% sort(decreasing = TRUE) %>% 
+  head(n = length(.) * 0.1) %>% names()
+
+# Add to data frame
+d.hub_both_bac <- d.both_bac %>% 
+  mutate(
+    top10_bn = case_when(OTU %in% top10_bn ~ TRUE,
+                         TRUE ~ FALSE),
+    top10_dg = case_when(OTU %in% top10_dg ~ TRUE,
+                         TRUE ~ FALSE),
+    top10_both_bac = case_when(top10_bn == TRUE & top10_dg == TRUE ~ TRUE,
+                           TRUE ~ FALSE))
+
+# save hub taxa
+write.csv(d.hub_both_bac, row.names = FALSE,
+          file = here("Data", "Interim", "Hub_taxa_bac.csv"))
+
+```
+
+### Check how network attributes correlate bacteria
+```{r echo=TRUE}
+# Check how network attributes correlate
+d.hub_both_bac %>% 
+  ggplot(aes(degree, betweenness)) + 
+  geom_point() +
+  geom_smooth(method = "lm") +
+  stat_regline_equation(aes(label =  paste(after_stat(eq.label), after_stat(adj.rr.label), 
+                                           sep = "~~~~")))
+
+# Highlight OTUs in the top 10% of both_bac degree and betweenness
+d.hub_both_bac %>% 
+  ggplot(aes(degree, betweenness)) + 
+  geom_point() +
+  geom_smooth(method = "lm") +
+  stat_regline_equation(aes(label =  paste(after_stat(eq.label), after_stat(adj.rr.label), 
+                                           sep = "~~~~"))) +
+  geom_point(data = d.hub_both_bac %>% filter(top10_both_bac == TRUE), aes(degree, betweenness), size = 4, 
+             shape = 21, color="red", stroke = 2)
+
+(d.hub_both_bac %>% filter(top10_both_bac == TRUE) %>% nrow())/(d.hub_both_bac %>% nrow())
+
+
+# Highlight OTUs in the top 10 % of either degree or betweenness
+d.hub_both_bac %>% 
+  ggplot(aes(degree, betweenness)) + 
+  geom_point() +
+  geom_smooth(method = "lm") +
+  stat_regline_equation(aes(label =  paste(after_stat(eq.label), after_stat(adj.rr.label), 
+                                           sep = "~~~~"))) +
+  geom_point(data = d.hub_both_bac %>% filter(top10_dg == TRUE | top10_bn == TRUE), aes(degree, betweenness), size = 4, 
+             shape = 21, color="red", stroke = 2) 
+
+(d.hub_both_bac %>% filter(top10_dg == TRUE | top10_bn == TRUE) %>% nrow())/(d.hub_both_bac %>% nrow())
+
+
+# Check ranks
+d.hub_both_bac %>% 
+  ggplot(aes(rank(degree), rank(betweenness))) + 
+  geom_point() +
+  geom_smooth(method = "lm") +
+  stat_regline_equation(aes(label =  paste(after_stat(eq.label), after_stat(adj.rr.label), 
+                                           sep = "~~~~"))) +
+  geom_point(data = d.hub_both_bac %>% 
+               mutate(degree = rank(degree),
+                      betweenness = rank(betweenness)) %>% 
+               filter(top10_dg == TRUE | top10_bn == TRUE), aes(degree, betweenness), size = 4, 
+             shape = 21, color="red", stroke = 2)
+
+
+# Number of OTUs that are either or 
+d.hub_both_bac %>% filter(top10_dg == TRUE | top10_bn == TRUE) %>% nrow()
+d.hub_both_bac %>% filter(top10_dg == TRUE) %>% nrow()
+d.hub_both_bac %>% filter(top10_bn == TRUE) %>% nrow()
+
+
+intersect(d.hub_both_bac %>% filter(top10_dg == TRUE),
+          d.hub_both_bac %>% filter(top10_bn == TRUE)) %>% nrow()
+
+
+d.hub_both_bac %>% filter(top10_both_bac == TRUE) %>% nrow()
+d.hub_both_bac %>% filter(top10_bn == TRUE | top10_dg == TRUE) %>% nrow()
+```
+
+
+## Compare different methods
+```{r}
+## Degree or betweenness in top 10%
+top_hub_comb <- d.hub_both %>% filter(top10_bn == TRUE | top10_dg == TRUE ) %>% pull(OTU)
+top_hub_fun <- d.hub_both_fun %>% filter(top10_bn == TRUE | top10_dg == TRUE ) %>% pull(OTU)
+top_hub_bac <- d.hub_both_bac %>% filter(top10_bn == TRUE | top10_dg == TRUE ) %>% pull(OTU)
+
+# Number of OTUs
+top_hub_comb %>% length()
+top_hub_fun %>% length()
+top_hub_bac %>% length()
+
+# Visualize intersections
+## all three
+l.otu_top_hub <- list(top_hub_comb = top_hub_comb,
+                      top_hub_fun = top_hub_fun,
+                      top_hub_bac = top_hub_bac)
+
+UpSetR::upset(UpSetR::fromList(l.otu_top_hub), order.by = "freq")
+
+## Combined kingdom analysis vs. bacteria + fungi
+l.otu_top_hub <- list(top_hub_comb = top_hub_comb,
+                      top_hub_fun_and_bac = c(top_hub_fun, top_hub_bac))
+
+UpSetR::upset(UpSetR::fromList(l.otu_top_hub), order.by = "freq")
+
+## Check intersect
+top_hub_intersect <- intersect(top_hub_comb, c(top_hub_fun, top_hub_bac))
+
+# Check intersection with OTUs of most interest
+otu_interest <- c("fOTU860", "fOTU1450", "fOTU1557", "bOTU15", "bOTU5", 
+                  "fOTU1598", "bOTU1", "fOTU22", "bOTU4", "fOTU1517", "fOTU1508")
+
+top_hub_intersect <- intersect(top_hub_intersect, otu_interest)
+top_hub_intersect
+
+```
 
 
 ```{r}
